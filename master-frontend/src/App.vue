@@ -6,6 +6,7 @@ import { showAlert, showConfirm, showPrompt, dialogKey } from './composables/use
 import type { ConnectionStateEvent, MonitoredNodeInfo } from './types'
 import Toolbar from './components/Toolbar.vue'
 import ConnectionTree from './components/ConnectionTree.vue'
+import LogPanel from './components/LogPanel.vue'
 
 // Shared state
 const selectedConnectionId = ref<string | null>(null)
@@ -89,9 +90,7 @@ function toggleLog() {
     </aside>
 
     <footer class="log-area">
-      <div style="padding: 8px 12px; font-size: 13px; color: #a6adc8; cursor: pointer;" @click="toggleLog">
-        Log panel placeholder (click to toggle)
-      </div>
+      <LogPanel :expanded="logExpanded" @toggle="toggleLog" />
     </footer>
     <AppDialog />
   </div>
