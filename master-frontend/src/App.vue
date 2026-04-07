@@ -7,6 +7,7 @@ import type { ConnectionStateEvent, MonitoredNodeInfo } from './types'
 import Toolbar from './components/Toolbar.vue'
 import ConnectionTree from './components/ConnectionTree.vue'
 import LogPanel from './components/LogPanel.vue'
+import BrowsePanel from './components/BrowsePanel.vue'
 
 // Shared state
 const selectedConnectionId = ref<string | null>(null)
@@ -93,6 +94,7 @@ function toggleLog() {
       <LogPanel :expanded="logExpanded" @toggle="toggleLog" />
     </footer>
     <AppDialog />
+    <BrowsePanel :visible="showBrowsePanel" @close="showBrowsePanel = false" />
   </div>
 </template>
 
