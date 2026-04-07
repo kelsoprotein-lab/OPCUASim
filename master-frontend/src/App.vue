@@ -4,12 +4,14 @@ import { listen } from '@tauri-apps/api/event'
 import { AppDialog } from 'shared-frontend'
 import { showAlert, showConfirm, showPrompt, dialogKey } from './composables/useDialog'
 import type { ConnectionStateEvent, MonitoredNodeInfo } from './types'
+import Toolbar from './components/Toolbar.vue'
 
 // Shared state
 const selectedConnectionId = ref<string | null>(null)
 const selectedConnectionState = ref<string>('Disconnected')
 const selectedNodes = ref<MonitoredNodeInfo[]>([])
 const logExpanded = ref(false)
+const showBrowsePanel = ref(false)
 
 // Provide shared state
 provide('selectedConnectionId', selectedConnectionId)
@@ -70,7 +72,7 @@ function toggleLog() {
 <template>
   <div :class="['app-layout', { 'log-expanded': logExpanded }]">
     <header class="toolbar-area">
-      <div style="padding: 8px 12px; font-size: 13px; color: #a6adc8;">OPCUAMaster — Toolbar placeholder</div>
+      <Toolbar @browse="showBrowsePanel = true" />
     </header>
 
     <aside class="tree-area">
