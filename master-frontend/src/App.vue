@@ -5,6 +5,7 @@ import { AppDialog } from 'shared-frontend'
 import { showAlert, showConfirm, showPrompt, dialogKey } from './composables/useDialog'
 import type { ConnectionStateEvent, MonitoredNodeInfo } from './types'
 import Toolbar from './components/Toolbar.vue'
+import ConnectionTree from './components/ConnectionTree.vue'
 
 // Shared state
 const selectedConnectionId = ref<string | null>(null)
@@ -76,7 +77,9 @@ function toggleLog() {
     </header>
 
     <aside class="tree-area">
-      <div style="padding: 8px 12px; font-size: 13px; color: #a6adc8;">Connection tree placeholder</div>
+      <ConnectionTree
+        @connection-select="handleConnectionSelect"
+      />
     </aside>
     <main class="content-area">
       <div style="padding: 8px 12px; font-size: 13px; color: #a6adc8;">Data table placeholder</div>
