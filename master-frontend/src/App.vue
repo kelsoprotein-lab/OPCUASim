@@ -9,6 +9,7 @@ import ConnectionTree from './components/ConnectionTree.vue'
 import LogPanel from './components/LogPanel.vue'
 import BrowsePanel from './components/BrowsePanel.vue'
 import DataTable from './components/DataTable.vue'
+import ValuePanel from './components/ValuePanel.vue'
 
 // Shared state
 const selectedConnectionId = ref<string | null>(null)
@@ -88,7 +89,7 @@ function toggleLog() {
       <DataTable @node-select="handleNodeSelect" />
     </main>
     <aside class="panel-area">
-      <div style="padding: 8px 12px; font-size: 13px; color: #a6adc8;">Value panel placeholder</div>
+      <ValuePanel />
     </aside>
 
     <footer class="log-area">
