@@ -5,7 +5,7 @@ use tokio::sync::RwLock;
 use log::info;
 
 use opcua_client::{DataChangeCallback, Session};
-use opcua_types::{MonitoredItemCreateRequest, NodeId, TimestampsToReturn};
+use opcua_types::{MonitoredItemCreateRequest, NodeId, ReadValueId, TimestampsToReturn};
 
 use crate::error::OpcUaSimError;
 use crate::node::MonitoredNode;
@@ -57,6 +57,9 @@ impl SubscriptionManager {
                     .await
                     .map_err(|e| OpcUaSimError::SubscriptionError(format!("Create monitored items failed: {}", e)))?;
             }
+
+            // Do an initial read to populate values immediately (don't wait for data change)
+            self.initial_read(session, &nodes).await;
         }
 
         Ok(())
@@ -76,7 +79,9 @@ impl SubscriptionManager {
         let update_seq = self.update_seq.clone();
 
         let callback = DataChangeCallback::new(move |data_value, monitored_item| {
-            let node_id_str = monitored_item.item_to_monitor().node_id.to_string();
+            let raw_node_id = &monitored_item.item_to_monitor().node_id;
+            let node_id_str = format!("{}", raw_node_id);
+            info!("DataChange callback for node: {}", node_id_str);
             let value_str = data_value.value.as_ref()
                 .map(|v| format!("{}", v))
                 .unwrap_or_else(|| "null".to_string());
@@ -125,6 +130,43 @@ impl SubscriptionManager {
 
         info!("Created OPC UA subscription with id: {}", sub_id);
         Ok(sub_id)
+    }
+
+    /// Read current values for nodes immediately after adding them
+    async fn initial_read(&self, session: &Arc<Session>, nodes: &[MonitoredNode]) {
+        let read_ids: Vec<ReadValueId> = nodes.iter()
+            .filter_map(|n| n.node_id.parse::<NodeId>().ok().map(ReadValueId::from))
+            .collect();
+
+        if read_ids.is_empty() {
+            return;
+        }
+
+        match session.read(&read_ids, TimestampsToReturn::Both, 0.0).await {
+            Ok(values) => {
+                let mut items = self.monitored_items.write().await;
+                let mut seq = self.update_seq.write().await;
+                for (i, dv) in values.iter().enumerate() {
+                    if i < nodes.len() {
+                        if let Some(node) = items.get_mut(&nodes[i].node_id) {
+                            *seq += 1;
+                            node.value = dv.value.as_ref().map(|v| format!("{}", v));
+                            node.quality = Some(
+                                dv.status.as_ref()
+                                    .map(|s| format!("{}", s))
+                                    .unwrap_or_else(|| "Good".to_string())
+                            );
+                            node.timestamp = dv.source_timestamp.as_ref().map(|t| t.to_string());
+                            node.update_seq = *seq;
+                        }
+                    }
+                }
+                info!("Initial read completed for {} nodes", values.len());
+            }
+            Err(e) => {
+                info!("Initial read failed (non-critical): {}", e);
+            }
+        }
     }
 
     pub async fn remove_nodes(&self, node_ids: &[String]) -> Result<(), OpcUaSimError> {
