@@ -152,7 +152,9 @@ impl OpcUaConnection {
             .application_uri("urn:OPCUAMaster")
             .create_sample_keypair(true)
             .trust_server_certs(true)
-            .session_retry_limit(3)
+            .session_retry_limit(-1) // Unlimited retries
+            .keep_alive_interval(std::time::Duration::from_secs(5)) // Keepalive every 5s
+            .request_timeout(std::time::Duration::from_secs(30))
             .client()
             .map_err(|errs| OpcUaSimError::ConnectionFailed(errs.join("; ")))?;
 
