@@ -146,68 +146,78 @@ impl SubscriptionManager {
         Ok(sub_id)
     }
 
-    /// Read current values for nodes immediately after adding them.
-    /// First reads NodeClass to determine the node type, then reads Value for Variables.
+    /// Batch read current values for all nodes in one OPC UA request (per batch of 200).
     async fn initial_read(&self, session: &Arc<Session>, nodes: &[MonitoredNode]) {
+        const BATCH_SIZE: usize = 200;
+
+        // Build all ReadValueIds upfront: 2 attributes per node (Value + NodeClass)
+        let mut valid_nodes: Vec<(usize, NodeId)> = Vec::new();
+        for (i, node) in nodes.iter().enumerate() {
+            if let Ok(nid) = node.node_id.parse::<NodeId>() {
+                valid_nodes.push((i, nid));
+            }
+        }
+
         let mut items = self.monitored_items.write().await;
         let mut seq = self.update_seq.write().await;
 
-        for node in nodes {
-            let node_id = match node.node_id.parse::<NodeId>() {
-                Ok(nid) => nid,
-                Err(_) => continue,
-            };
-
-            // Read NodeClass + Value + DisplayName in one batch
-            let read_ids = vec![
-                ReadValueId::new(node_id.clone(), opcua_types::AttributeId::NodeClass),
-                ReadValueId::new(node_id.clone(), opcua_types::AttributeId::Value),
-                ReadValueId::new(node_id.clone(), opcua_types::AttributeId::DisplayName),
-            ];
+        for batch in valid_nodes.chunks(BATCH_SIZE) {
+            // Build batch read request: [NodeClass0, Value0, NodeClass1, Value1, ...]
+            let read_ids: Vec<ReadValueId> = batch.iter().flat_map(|(_, nid)| {
+                vec![
+                    ReadValueId::new(nid.clone(), opcua_types::AttributeId::NodeClass),
+                    ReadValueId::new(nid.clone(), opcua_types::AttributeId::Value),
+                ]
+            }).collect();
 
             match session.read(&read_ids, TimestampsToReturn::Both, 0.0).await {
                 Ok(values) => {
-                    let node_class = values.first()
-                        .and_then(|dv| dv.value.as_ref())
-                        .map(|v| format!("{}", v))
-                        .unwrap_or_else(|| "Unknown".to_string());
+                    // Process results: every 2 values correspond to one node
+                    for (batch_idx, (node_idx, _)) in batch.iter().enumerate() {
+                        let nc_dv = values.get(batch_idx * 2);
+                        let val_dv = values.get(batch_idx * 2 + 1);
 
-                    let value_dv = values.get(1);
-                    let value = value_dv.and_then(|dv| dv.value.as_ref()).map(|v| format!("{}", v));
-                    let quality = value_dv.and_then(|dv| dv.status.as_ref()).map(|s| format!("{}", s));
-                    let timestamp = value_dv.and_then(|dv| dv.source_timestamp.as_ref()).map(|t| t.to_string());
+                        let node_class = nc_dv
+                            .and_then(|dv| dv.value.as_ref())
+                            .map(|v| format!("{}", v))
+                            .unwrap_or_else(|| "Unknown".to_string());
 
-                    // If Value read failed (BadAttributeIdInvalid), it's not a Variable
-                    let is_value_ok = quality.as_deref() != Some("BadAttributeIdInvalid");
+                        let value = val_dv.and_then(|dv| dv.value.as_ref()).map(|v| format!("{}", v));
+                        let quality = val_dv.and_then(|dv| dv.status.as_ref()).map(|s| format!("{}", s));
+                        let timestamp = val_dv.and_then(|dv| dv.source_timestamp.as_ref()).map(|t| t.to_string());
+                        let is_value_ok = quality.as_deref() != Some("BadAttributeIdInvalid");
 
-                    if let Some(n) = items.get_mut(&node.node_id) {
-                        *seq += 1;
-                        if is_value_ok {
-                            n.value = value;
-                            n.quality = Some(quality.unwrap_or_else(|| "Good".to_string()));
-                            n.timestamp = timestamp;
-                            n.data_type = format!("Variable ({})", node_class);
-                        } else {
-                            n.value = None;
-                            n.quality = Some(format!("Not a Variable (NodeClass={})", node_class));
-                            n.data_type = node_class.clone();
+                        if let Some(n) = items.get_mut(&nodes[*node_idx].node_id) {
+                            *seq += 1;
+                            if is_value_ok {
+                                n.value = value;
+                                n.quality = Some(quality.unwrap_or_else(|| "Good".to_string()));
+                                n.timestamp = timestamp;
+                                n.data_type = format!("Variable ({})", node_class);
+                            } else {
+                                n.value = None;
+                                n.quality = Some(format!("Not a Variable ({})", node_class));
+                                n.data_type = node_class;
+                            }
+                            n.update_seq = *seq;
                         }
-                        n.update_seq = *seq;
                     }
-
-                    info!("Initial read for {}: nodeClass={}, hasValue={}", node.node_id, node_class, is_value_ok);
+                    info!("Batch read completed: {} nodes", batch.len());
                 }
                 Err(e) => {
-                    if let Some(n) = items.get_mut(&node.node_id) {
-                        *seq += 1;
-                        n.quality = Some(format!("ReadError: {}", e));
-                        n.update_seq = *seq;
+                    // Mark all nodes in this batch as failed
+                    for (node_idx, _) in batch {
+                        if let Some(n) = items.get_mut(&nodes[*node_idx].node_id) {
+                            *seq += 1;
+                            n.quality = Some(format!("ReadError: {}", e));
+                            n.update_seq = *seq;
+                        }
                     }
-                    info!("Initial read failed for {}: {}", node.node_id, e);
+                    info!("Batch read failed: {}", e);
                 }
             }
         }
-        info!("Initial read completed for {} nodes", nodes.len());
+        info!("Initial read completed for {} nodes ({} batches)", nodes.len(), (valid_nodes.len() + BATCH_SIZE - 1) / BATCH_SIZE);
     }
 
     /// Reset the subscription ID (e.g. after reconnect)

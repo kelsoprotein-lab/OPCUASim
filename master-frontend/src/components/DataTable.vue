@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, inject, watch, computed, onMounted, onUnmounted, type Ref } from 'vue'
+import { useVirtualizer } from '@tanstack/vue-virtual'
 import { invoke } from '@tauri-apps/api/core'
 import type { MonitoredNodeInfo } from '../types'
 
@@ -10,41 +11,66 @@ const emit = defineEmits<{
 const selectedConnectionId = inject<Ref<string | null>>('selectedConnectionId')!
 const dataRefreshKey = inject<Ref<number>>('dataRefreshKey')!
 
-const nodes = ref<MonitoredNodeInfo[]>([])
+const allNodes = ref<Map<string, MonitoredNodeInfo>>(new Map())
 const selectedNodeIds = ref<Set<string>>(new Set())
 const searchQuery = ref('')
+const lastSeq = ref(0)
 let pollTimer: ReturnType<typeof setInterval> | null = null
+const tableBodyRef = ref<HTMLElement | null>(null)
 
-// Extract short identifier from NodeId (e.g. "ns=3;s=OPCUA1-xxx" → "OPCUA1-xxx")
 function shortNodeId(nodeId: string): string {
   const parts = nodeId.split(';')
   const last = parts[parts.length - 1]
-  // Remove "s=", "i=", "g=", "b=" prefix
   return last.replace(/^[sigb]=/, '')
 }
 
-// Filter nodes by search query
+const nodeList = computed(() => Array.from(allNodes.value.values()))
+
 const filteredNodes = computed(() => {
-  if (!searchQuery.value) return nodes.value
+  const list = nodeList.value
+  if (!searchQuery.value) return list
   const q = searchQuery.value.toLowerCase()
-  return nodes.value.filter((n) =>
+  return list.filter((n) =>
     n.node_id.toLowerCase().includes(q) ||
     n.display_name.toLowerCase().includes(q) ||
     (n.value && n.value.toLowerCase().includes(q))
   )
 })
 
+// Virtual scrolling
+const virtualizer = useVirtualizer({
+  get count() { return filteredNodes.value.length },
+  getScrollElement: () => tableBodyRef.value,
+  estimateSize: () => 24,
+  overscan: 10,
+})
+
 async function loadData() {
   if (!selectedConnectionId.value) {
-    nodes.value = []
+    allNodes.value = new Map()
+    lastSeq.value = 0
     return
   }
   try {
     const data = await invoke<{ nodes: MonitoredNodeInfo[], seq: number }>('get_monitored_data', {
       connId: selectedConnectionId.value,
-      sinceSeq: 0,
+      sinceSeq: lastSeq.value,
     }).catch(() => ({ nodes: [], seq: 0 }))
-    nodes.value = data.nodes
+
+    if (lastSeq.value === 0) {
+      // Full load
+      const map = new Map<string, MonitoredNodeInfo>()
+      for (const n of data.nodes) map.set(n.node_id, n)
+      allNodes.value = map
+    } else {
+      // Incremental merge
+      if (data.nodes.length > 0) {
+        const map = new Map(allNodes.value)
+        for (const n of data.nodes) map.set(n.node_id, n)
+        allNodes.value = map
+      }
+    }
+    if (data.seq > 0) lastSeq.value = data.seq
   } catch {
     // silent
   }
@@ -65,11 +91,15 @@ function stopPolling() {
 }
 
 watch(selectedConnectionId, () => {
+  lastSeq.value = 0
   loadData()
   startPolling()
 })
 
-watch(dataRefreshKey, loadData)
+watch(dataRefreshKey, () => {
+  lastSeq.value = 0
+  loadData()
+})
 
 onMounted(() => {
   loadData()
@@ -90,7 +120,7 @@ function selectNode(node: MonitoredNodeInfo, event: MouseEvent) {
     selectedNodeIds.value.add(node.node_id)
   }
   selectedNodeIds.value = new Set(selectedNodeIds.value)
-  const selected = nodes.value.filter((n) => selectedNodeIds.value.has(n.node_id))
+  const selected = nodeList.value.filter((n) => selectedNodeIds.value.has(n.node_id))
   emit('node-select', selected)
 }
 
@@ -108,17 +138,11 @@ function qualityColor(quality?: string): string {
 
 <template>
   <div class="data-table-container">
-    <!-- Search bar -->
     <div class="search-bar">
-      <input
-        v-model="searchQuery"
-        class="search-input"
-        placeholder="Search NodeId, Name, Value..."
-      />
-      <span class="node-count">{{ filteredNodes.length }} / {{ nodes.length }} nodes</span>
+      <input v-model="searchQuery" class="search-input" placeholder="Search NodeId, Name, Value..." />
+      <span class="node-count">{{ filteredNodes.length }} / {{ nodeList.length }} nodes</span>
     </div>
 
-    <!-- Table header -->
     <div class="table-header">
       <div class="th col-id">NodeId</div>
       <div class="th col-name">Name</div>
@@ -128,23 +152,32 @@ function qualityColor(quality?: string): string {
       <div class="th col-mode">Mode</div>
     </div>
 
-    <!-- Table body -->
-    <div class="table-body">
-      <div v-if="nodes.length === 0" class="empty-state">
+    <div ref="tableBodyRef" class="table-body">
+      <div v-if="nodeList.length === 0" class="empty-state">
         No monitored nodes. Use "Browse Nodes" to add nodes.
       </div>
-      <div
-        v-for="(node, i) in filteredNodes"
-        :key="node.node_id"
-        :class="['table-row', { selected: isSelected(node), alt: i % 2 === 1 }]"
-        @click="selectNode(node, $event)"
-      >
-        <div class="td mono col-id" :title="node.node_id">{{ shortNodeId(node.node_id) }}</div>
-        <div class="td col-name" :title="node.display_name">{{ node.display_name }}</div>
-        <div class="td mono col-value value-cell" :title="node.value || ''">{{ node.value || '—' }}</div>
-        <div class="td col-quality"><span :style="{ color: qualityColor(node.quality) }">{{ node.quality || '—' }}</span></div>
-        <div class="td mono col-time" :title="node.timestamp || ''">{{ node.timestamp ? node.timestamp.substring(11, 19) : '—' }}</div>
-        <div class="td col-mode"><span class="mode-badge">{{ node.access_mode === 'Subscription' ? 'Sub' : 'Poll' }}</span></div>
+      <div v-else :style="{ height: `${virtualizer.getTotalSize()}px`, position: 'relative' }">
+        <div
+          v-for="row in virtualizer.getVirtualItems()"
+          :key="filteredNodes[row.index].node_id"
+          :class="['table-row', { selected: isSelected(filteredNodes[row.index]), alt: row.index % 2 === 1 }]"
+          :style="{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            width: '100%',
+            height: `${row.size}px`,
+            transform: `translateY(${row.start}px)`,
+          }"
+          @click="selectNode(filteredNodes[row.index], $event)"
+        >
+          <div class="td mono col-id" :title="filteredNodes[row.index].node_id">{{ shortNodeId(filteredNodes[row.index].node_id) }}</div>
+          <div class="td col-name" :title="filteredNodes[row.index].display_name">{{ filteredNodes[row.index].display_name }}</div>
+          <div class="td mono col-value value-cell" :title="filteredNodes[row.index].value || ''">{{ filteredNodes[row.index].value || '—' }}</div>
+          <div class="td col-quality"><span :style="{ color: qualityColor(filteredNodes[row.index].quality) }">{{ filteredNodes[row.index].quality || '—' }}</span></div>
+          <div class="td mono col-time">{{ filteredNodes[row.index].timestamp ? filteredNodes[row.index].timestamp!.substring(11, 19) : '—' }}</div>
+          <div class="td col-mode"><span class="mode-badge">{{ filteredNodes[row.index].access_mode === 'Subscription' ? 'Sub' : 'Poll' }}</span></div>
+        </div>
       </div>
     </div>
   </div>
@@ -188,7 +221,6 @@ function qualityColor(quality?: string): string {
   white-space: nowrap;
 }
 
-/* Column widths — flex ratios for responsive layout */
 .col-id { flex: 2; min-width: 100px; }
 .col-name { flex: 3; min-width: 120px; }
 .col-value { flex: 2; min-width: 80px; }
