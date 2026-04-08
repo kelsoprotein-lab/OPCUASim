@@ -168,16 +168,41 @@ impl OpcUaConnection {
             UserTokenPolicy::anonymous(),
         ).into();
 
-        // Connect — use connect_to_endpoint_directly to avoid endpoint discovery issues
-        let (session, event_loop) = client
-            .connect_to_endpoint_directly(endpoint, identity_token)
-            .map_err(|e| OpcUaSimError::ConnectionFailed(e.to_string()))?;
+        // Try connect_to_matching_endpoint first (does endpoint discovery),
+        // fall back to connect_to_endpoint_directly
+        let connect_result = client
+            .connect_to_matching_endpoint(endpoint.clone(), identity_token.clone())
+            .await;
+
+        let (session, event_loop) = match connect_result {
+            Ok(result) => result,
+            Err(e) => {
+                info!("Endpoint discovery failed ({}), trying direct connection...", e);
+                self.log_response("Session", &format!("Discovery failed: {}, trying direct...", e), None);
+                client
+                    .connect_to_endpoint_directly(endpoint, identity_token)
+                    .map_err(|e| OpcUaSimError::ConnectionFailed(e.to_string()))?
+            }
+        };
 
         // Spawn the event loop
         let handle = event_loop.spawn();
 
-        // Wait for connection
-        session.wait_for_connection().await;
+        // Wait for connection with timeout
+        let timeout_ms = self.config.timeout_ms.max(5000);
+        let wait_result = tokio::time::timeout(
+            std::time::Duration::from_millis(timeout_ms),
+            session.wait_for_connection(),
+        ).await;
+
+        if wait_result.is_err() {
+            // Timeout — abort event loop and fail
+            handle.abort();
+            self.set_state(ConnectionState::Disconnected).await;
+            let msg = format!("Connection timeout after {}ms to {}", timeout_ms, self.config.endpoint_url);
+            self.log_response("Session", &msg, Some("BadTimeout"));
+            return Err(OpcUaSimError::ConnectionFailed(msg));
+        }
 
         // Store session and event loop handle
         {
