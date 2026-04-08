@@ -413,7 +413,11 @@ pub async fn get_monitored_data(
     };
     // std lock dropped — safe to await.
 
-    let nodes = sub_mgr.get_monitored_nodes_since(since_seq).await;
+    let nodes = if since_seq == 0 {
+        sub_mgr.get_monitored_nodes().await
+    } else {
+        sub_mgr.get_monitored_nodes_since(since_seq).await
+    };
     let seq = sub_mgr.get_update_seq().await;
 
     let node_dtos: Vec<MonitoredNodeDto> = nodes.into_iter().map(|n| {
