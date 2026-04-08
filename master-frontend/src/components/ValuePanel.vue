@@ -17,8 +17,8 @@ async function readNode() {
   if (!node.value || !selectedConnectionId.value) return
   try {
     await invoke('read_node_attributes', {
-      conn_id: selectedConnectionId.value,
-      node_id: node.value.node_id,
+      connId: selectedConnectionId.value,
+      nodeId: node.value.node_id,
     }).catch(() => {
       // Not yet implemented until Task 8
     })

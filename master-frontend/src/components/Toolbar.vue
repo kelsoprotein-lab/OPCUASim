@@ -101,7 +101,7 @@ async function openProject() {
 async function exportLogs() {
   if (!selectedConnectionId.value) return
   try {
-    const csv = await invoke<string>('export_logs_csv', { conn_id: selectedConnectionId.value })
+    const csv = await invoke<string>('export_logs_csv', { connId: selectedConnectionId.value })
     const blob = new Blob([csv], { type: 'text/csv' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')

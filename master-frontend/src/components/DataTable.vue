@@ -21,8 +21,8 @@ async function loadData() {
   }
   try {
     const data = await invoke<{ nodes: MonitoredNodeInfo[], seq: number }>('get_monitored_data', {
-      conn_id: selectedConnectionId.value,
-      since_seq: 0,
+      connId: selectedConnectionId.value,
+      sinceSeq: 0,
     }).catch(() => ({ nodes: [], seq: 0 }))
     nodes.value = data.nodes
   } catch {

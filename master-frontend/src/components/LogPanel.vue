@@ -25,8 +25,8 @@ async function loadLogs() {
   }
   try {
     logs.value = await invoke<LogEntry[]>('get_communication_logs', {
-      conn_id: selectedConnectionId.value,
-      since_seq: 0,
+      connId: selectedConnectionId.value,
+      sinceSeq: 0,
     })
   } catch (e) {
     console.error('Failed to load logs:', e)
@@ -92,7 +92,7 @@ const filteredLogs = computed(() => {
 async function clearLogs() {
   if (!selectedConnectionId.value) return
   try {
-    await invoke('clear_communication_logs', { conn_id: selectedConnectionId.value })
+    await invoke('clear_communication_logs', { connId: selectedConnectionId.value })
     logs.value = []
   } catch (e) {
     console.error('Failed to clear logs:', e)
@@ -102,7 +102,7 @@ async function clearLogs() {
 async function exportCsv() {
   if (!selectedConnectionId.value) return
   try {
-    const csv = await invoke<string>('export_logs_csv', { conn_id: selectedConnectionId.value })
+    const csv = await invoke<string>('export_logs_csv', { connId: selectedConnectionId.value })
     const blob = new Blob([csv], { type: 'text/csv' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
