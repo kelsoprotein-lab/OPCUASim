@@ -133,7 +133,7 @@ impl SubscriptionManager {
     }
 
     /// Read current values for nodes immediately after adding them.
-    /// Reads each node individually to avoid one bad node failing the entire batch.
+    /// First reads NodeClass to determine the node type, then reads Value for Variables.
     async fn initial_read(&self, session: &Arc<Session>, nodes: &[MonitoredNode]) {
         let mut items = self.monitored_items.write().await;
         let mut seq = self.update_seq.write().await;
@@ -144,26 +144,46 @@ impl SubscriptionManager {
                 Err(_) => continue,
             };
 
-            let read_ids = vec![ReadValueId::from(node_id)];
+            // Read NodeClass + Value + DisplayName in one batch
+            let read_ids = vec![
+                ReadValueId::new(node_id.clone(), opcua_types::AttributeId::NodeClass),
+                ReadValueId::new(node_id.clone(), opcua_types::AttributeId::Value),
+                ReadValueId::new(node_id.clone(), opcua_types::AttributeId::DisplayName),
+            ];
+
             match session.read(&read_ids, TimestampsToReturn::Both, 0.0).await {
                 Ok(values) => {
-                    if let Some(dv) = values.first() {
-                        if let Some(n) = items.get_mut(&node.node_id) {
-                            *seq += 1;
-                            n.value = dv.value.as_ref().map(|v| format!("{}", v));
-                            n.quality = Some(
-                                dv.status.as_ref()
-                                    .map(|s| format!("{}", s))
-                                    .unwrap_or_else(|| "Good".to_string())
-                            );
-                            n.timestamp = dv.source_timestamp.as_ref().map(|t| t.to_string());
-                            n.update_seq = *seq;
-                            info!("Initial read for {}: value={:?}", node.node_id, n.value);
+                    let node_class = values.first()
+                        .and_then(|dv| dv.value.as_ref())
+                        .map(|v| format!("{}", v))
+                        .unwrap_or_else(|| "Unknown".to_string());
+
+                    let value_dv = values.get(1);
+                    let value = value_dv.and_then(|dv| dv.value.as_ref()).map(|v| format!("{}", v));
+                    let quality = value_dv.and_then(|dv| dv.status.as_ref()).map(|s| format!("{}", s));
+                    let timestamp = value_dv.and_then(|dv| dv.source_timestamp.as_ref()).map(|t| t.to_string());
+
+                    // If Value read failed (BadAttributeIdInvalid), it's not a Variable
+                    let is_value_ok = quality.as_deref() != Some("BadAttributeIdInvalid");
+
+                    if let Some(n) = items.get_mut(&node.node_id) {
+                        *seq += 1;
+                        if is_value_ok {
+                            n.value = value;
+                            n.quality = Some(quality.unwrap_or_else(|| "Good".to_string()));
+                            n.timestamp = timestamp;
+                            n.data_type = format!("Variable ({})", node_class);
+                        } else {
+                            n.value = None;
+                            n.quality = Some(format!("Not a Variable (NodeClass={})", node_class));
+                            n.data_type = node_class.clone();
                         }
+                        n.update_seq = *seq;
                     }
+
+                    info!("Initial read for {}: nodeClass={}, hasValue={}", node.node_id, node_class, is_value_ok);
                 }
                 Err(e) => {
-                    // Mark the node so it shows up in DataTable even if read fails
                     if let Some(n) = items.get_mut(&node.node_id) {
                         *seq += 1;
                         n.quality = Some(format!("ReadError: {}", e));
