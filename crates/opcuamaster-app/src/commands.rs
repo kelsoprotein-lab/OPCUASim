@@ -286,10 +286,11 @@ pub async fn add_variables_under_node(
     node_id: String,
     access_mode: Option<String>,
     interval_ms: Option<f64>,
+    max_depth: Option<u32>,
 ) -> Result<u32, String> {
     let session = get_session_from_state(&state, &conn_id).await?;
 
-    let variables = opcuasim_core::browse::collect_variables(&session, &node_id, 10)
+    let variables = opcuasim_core::browse::collect_variables(&session, &node_id, max_depth.unwrap_or(1))
         .await
         .map_err(|e| e.to_string())?;
 
