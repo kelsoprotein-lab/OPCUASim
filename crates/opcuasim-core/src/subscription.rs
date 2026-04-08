@@ -162,24 +162,23 @@ impl SubscriptionManager {
         let mut seq = self.update_seq.write().await;
 
         for batch in valid_nodes.chunks(BATCH_SIZE) {
-            // Build batch read request: [NodeClass0, Value0, NodeClass1, Value1, ...]
+            // Build batch read request: [DataType0, Value0, DataType1, Value1, ...]
             let read_ids: Vec<ReadValueId> = batch.iter().flat_map(|(_, nid)| {
                 vec![
-                    ReadValueId::new(nid.clone(), opcua_types::AttributeId::NodeClass),
+                    ReadValueId::new(nid.clone(), opcua_types::AttributeId::DataType),
                     ReadValueId::new(nid.clone(), opcua_types::AttributeId::Value),
                 ]
             }).collect();
 
             match session.read(&read_ids, TimestampsToReturn::Both, 0.0).await {
                 Ok(values) => {
-                    // Process results: every 2 values correspond to one node
                     for (batch_idx, (node_idx, _)) in batch.iter().enumerate() {
-                        let nc_dv = values.get(batch_idx * 2);
+                        let dt_dv = values.get(batch_idx * 2);
                         let val_dv = values.get(batch_idx * 2 + 1);
 
-                        let node_class = nc_dv
+                        let data_type = dt_dv
                             .and_then(|dv| dv.value.as_ref())
-                            .map(|v| format!("{}", v))
+                            .map(|v| resolve_data_type(&format!("{}", v)))
                             .unwrap_or_else(|| "Unknown".to_string());
 
                         let value = val_dv.and_then(|dv| dv.value.as_ref()).map(|v| format!("{}", v));
@@ -193,11 +192,11 @@ impl SubscriptionManager {
                                 n.value = value;
                                 n.quality = Some(quality.unwrap_or_else(|| "Good".to_string()));
                                 n.timestamp = timestamp;
-                                n.data_type = format!("Variable ({})", node_class);
+                                n.data_type = data_type;
                             } else {
                                 n.value = None;
-                                n.quality = Some(format!("Not a Variable ({})", node_class));
-                                n.data_type = node_class;
+                                n.quality = Some("N/A".to_string());
+                                n.data_type = data_type;
                             }
                             n.update_seq = *seq;
                         }
@@ -264,6 +263,40 @@ impl SubscriptionManager {
 
     pub async fn get_update_seq(&self) -> u64 {
         *self.update_seq.read().await
+    }
+}
+
+/// Resolve OPC UA DataType NodeId to human-readable name
+fn resolve_data_type(node_id_str: &str) -> String {
+    // OPC UA built-in type NodeIds (namespace 0, numeric identifiers)
+    match node_id_str {
+        "i=1" => "Boolean".to_string(),
+        "i=2" => "SByte".to_string(),
+        "i=3" => "Byte".to_string(),
+        "i=4" => "Int16".to_string(),
+        "i=5" => "UInt16".to_string(),
+        "i=6" => "Int32".to_string(),
+        "i=7" => "UInt32".to_string(),
+        "i=8" => "Int64".to_string(),
+        "i=9" => "UInt64".to_string(),
+        "i=10" => "Float".to_string(),
+        "i=11" => "Double".to_string(),
+        "i=12" => "String".to_string(),
+        "i=13" => "DateTime".to_string(),
+        "i=14" => "Guid".to_string(),
+        "i=15" => "ByteString".to_string(),
+        "i=16" => "XmlElement".to_string(),
+        "i=17" => "NodeId".to_string(),
+        "i=19" => "StatusCode".to_string(),
+        "i=20" => "QualifiedName".to_string(),
+        "i=21" => "LocalizedText".to_string(),
+        "i=22" => "ExtensionObject".to_string(),
+        "i=24" => "BaseDataType".to_string(),
+        "i=26" => "Number".to_string(),
+        "i=27" => "Integer".to_string(),
+        "i=28" => "UInteger".to_string(),
+        "i=29" => "Enumeration".to_string(),
+        other => other.to_string(),
     }
 }
 
