@@ -3,12 +3,15 @@ use uuid::Uuid;
 
 use opcuasim_core::client::OpcUaConnection;
 use opcuasim_core::config::{AuthConfig, ConnectionConfig, ProjectFile, ConnectionProjectEntry};
+use opcuasim_core::subscription::SubscriptionManager;
+use opcuasim_core::polling::PollingManager;
+use opcuasim_core::node::{AccessMode, MonitoredNode, NodeGroup};
 
 use crate::state::{
     AppState, ConnectionEntry, ConnectionInfoDto, ConnectionStateEvent,
-    NodeGroupDto,
+    NodeGroupDto, BrowseResultDto, NodeAttributesDto, MonitoredNodeDto,
+    MonitoredDataDto,
 };
-use opcuasim_core::node::NodeGroup;
 
 // ── Connection Management ──────────────────────────────────────────
 
@@ -73,7 +76,11 @@ pub fn create_connection(
 
     let connection = OpcUaConnection::new(config);
     let mut connections = state.connections.write().map_err(|e| e.to_string())?;
-    connections.insert(id, ConnectionEntry { connection });
+    connections.insert(id, ConnectionEntry {
+        connection,
+        subscription_mgr: SubscriptionManager::new(),
+        polling_mgr: PollingManager::new(),
+    });
 
     Ok(dto)
 }
@@ -84,28 +91,54 @@ pub async fn connect(
     state: State<'_, AppState>,
     id: String,
 ) -> Result<(), String> {
-    // Clone the Arc-wrapped fields needed for async operations.
-    // The std::sync::RwLock guard is dropped before any .await point.
-    let (conn_id, state_arc) = {
+    let (conn_id, state_arc, config_clone) = {
         let connections = state.connections.read().map_err(|e| e.to_string())?;
         let entry = connections.get(&id).ok_or("Connection not found")?;
         (
             entry.connection.config.id.clone(),
             entry.connection.state.clone(),
+            entry.connection.config.clone(),
         )
     };
     // Guard dropped — safe to await.
-    // Drive state transition directly via the Arc refs (mirrors OpcUaConnection::connect).
+
     use opcuasim_core::client::ConnectionState;
     *state_arc.write().await = ConnectionState::Connecting;
-    *state_arc.write().await = ConnectionState::Connected;
 
     let _ = app.emit("connection-state-changed", ConnectionStateEvent {
-        id: conn_id,
-        state: "Connected".to_string(),
+        id: conn_id.clone(),
+        state: "Connecting".to_string(),
     });
 
-    Ok(())
+    // Create a new OpcUaConnection for the actual connection attempt
+    let temp_conn = OpcUaConnection::new(config_clone);
+    match temp_conn.connect().await {
+        Ok(()) => {
+            // Replace the connection entry with the connected one
+            {
+                let mut connections = state.connections.write().map_err(|e| e.to_string())?;
+                if let Some(entry) = connections.get_mut(&id) {
+                    entry.connection = temp_conn;
+                }
+            }
+
+            *state_arc.write().await = ConnectionState::Connected;
+
+            let _ = app.emit("connection-state-changed", ConnectionStateEvent {
+                id: conn_id,
+                state: "Connected".to_string(),
+            });
+            Ok(())
+        }
+        Err(e) => {
+            *state_arc.write().await = ConnectionState::Disconnected;
+            let _ = app.emit("connection-state-changed", ConnectionStateEvent {
+                id: conn_id,
+                state: "Disconnected".to_string(),
+            });
+            Err(format!("Connection failed: {}", e))
+        }
+    }
 }
 
 #[tauri::command]
@@ -114,13 +147,30 @@ pub async fn disconnect(
     state: State<'_, AppState>,
     id: String,
 ) -> Result<(), String> {
-    // Clone Arc ref before any await — guard must not be held across await.
+    // Clone the state arc and get session before any await
     let state_arc = {
         let connections = state.connections.read().map_err(|e| e.to_string())?;
         let entry = connections.get(&id).ok_or("Connection not found")?;
         entry.connection.state.clone()
     };
-    // Guard dropped — safe to await.
+    // Guard dropped.
+
+    // Extract the config. Can't hold std::sync::RwLock across await.
+    let config = {
+        let connections = state.connections.read().map_err(|e| e.to_string())?;
+        let entry = connections.get(&id).ok_or("Connection not found")?;
+        entry.connection.config.clone()
+    };
+
+    // Replace connection with a fresh disconnected one (drops old session)
+    {
+        let mut connections = state.connections.write().map_err(|e| e.to_string())?;
+        if let Some(entry) = connections.get_mut(&id) {
+            // Replace with a fresh disconnected connection (drops old one, closing session)
+            entry.connection = OpcUaConnection::new(config);
+        }
+    }
+
     use opcuasim_core::client::ConnectionState;
     *state_arc.write().await = ConnectionState::Disconnected;
 
@@ -146,7 +196,6 @@ pub fn delete_connection(
 pub async fn list_connections(
     state: State<'_, AppState>,
 ) -> Result<Vec<ConnectionInfoDto>, String> {
-    // Collect the data needed without holding the lock across await.
     let entries: Vec<(String, String, String, String, String, AuthConfig, std::sync::Arc<tokio::sync::RwLock<opcuasim_core::client::ConnectionState>>)> = {
         let connections = state.connections.read().map_err(|e| e.to_string())?;
         connections.iter().map(|(id, entry)| {
@@ -184,13 +233,218 @@ pub async fn list_connections(
     Ok(result)
 }
 
+// ── Browse Commands ──────────────────────────────────────────
+
+#[tauri::command]
+pub async fn browse_root(
+    state: State<'_, AppState>,
+    conn_id: String,
+) -> Result<Vec<BrowseResultDto>, String> {
+    let session = get_session_from_state(&state, &conn_id).await?;
+
+    let items = opcuasim_core::browse::browse_node(&session, None)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    Ok(items.into_iter().map(|item| BrowseResultDto {
+        node_id: item.node_id,
+        display_name: item.display_name,
+        node_class: item.node_class,
+        data_type: item.data_type,
+        has_children: item.has_children,
+    }).collect())
+}
+
+#[tauri::command]
+pub async fn browse_node(
+    state: State<'_, AppState>,
+    conn_id: String,
+    node_id: String,
+) -> Result<Vec<BrowseResultDto>, String> {
+    let session = get_session_from_state(&state, &conn_id).await?;
+
+    let items = opcuasim_core::browse::browse_node(&session, Some(&node_id))
+        .await
+        .map_err(|e| e.to_string())?;
+
+    Ok(items.into_iter().map(|item| BrowseResultDto {
+        node_id: item.node_id,
+        display_name: item.display_name,
+        node_class: item.node_class,
+        data_type: item.data_type,
+        has_children: item.has_children,
+    }).collect())
+}
+
+/// Extract the session Arc from state without holding std::sync::RwLock across await.
+/// Clones the session holder Arc synchronously, drops the std lock, then awaits the tokio lock.
+async fn get_session_from_state(
+    state: &State<'_, AppState>,
+    conn_id: &str,
+) -> Result<std::sync::Arc<opcuasim_core::OpcUaSession>, String> {
+    let session_holder = {
+        let connections = state.connections.read().map_err(|e| e.to_string())?;
+        let entry = connections.get(conn_id).ok_or("Connection not found")?;
+        entry.connection.get_session_holder()
+    };
+    // std lock dropped — safe to await.
+    let guard = session_holder.read().await;
+    guard.clone().ok_or_else(|| "Not connected — no active session".to_string())
+}
+
+#[tauri::command]
+pub async fn read_node_attributes(
+    state: State<'_, AppState>,
+    conn_id: String,
+    node_id: String,
+) -> Result<NodeAttributesDto, String> {
+    let session = get_session_from_state(&state, &conn_id).await?;
+
+    let attrs = opcuasim_core::browse::read_node_attributes(&session, &node_id)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    Ok(NodeAttributesDto {
+        node_id: attrs.node_id,
+        display_name: attrs.display_name,
+        description: attrs.description,
+        data_type: attrs.data_type,
+        access_level: attrs.access_level,
+        value: attrs.value,
+        quality: attrs.quality,
+        timestamp: attrs.timestamp,
+    })
+}
+
+// ── Monitor Commands ──────────────────────────────────────────
+
+#[derive(serde::Deserialize)]
+pub struct AddMonitoredNodesRequest {
+    pub conn_id: String,
+    pub nodes: Vec<MonitoredNodeRequest>,
+}
+
+#[derive(serde::Deserialize)]
+pub struct MonitoredNodeRequest {
+    pub node_id: String,
+    pub display_name: String,
+    pub browse_path: Option<String>,
+    pub data_type: Option<String>,
+    pub access_mode: Option<String>,
+    pub interval_ms: Option<f64>,
+    pub group_id: Option<String>,
+}
+
+#[tauri::command]
+pub async fn add_monitored_nodes(
+    state: State<'_, AppState>,
+    request: AddMonitoredNodesRequest,
+) -> Result<(), String> {
+    let nodes: Vec<MonitoredNode> = request.nodes.into_iter().map(|n| {
+        let access_mode = match n.access_mode.as_deref() {
+            Some("Polling") => AccessMode::Polling {
+                interval_ms: n.interval_ms.unwrap_or(1000.0) as u64,
+            },
+            _ => AccessMode::Subscription {
+                interval_ms: n.interval_ms.unwrap_or(1000.0),
+            },
+        };
+        MonitoredNode {
+            node_id: n.node_id,
+            display_name: n.display_name,
+            browse_path: n.browse_path.unwrap_or_default(),
+            data_type: n.data_type.unwrap_or_else(|| "Unknown".to_string()),
+            value: None,
+            quality: None,
+            timestamp: None,
+            access_mode,
+            group_id: n.group_id,
+            update_seq: 0,
+        }
+    }).collect();
+
+    // Clone SubscriptionManager (cheap Arc clones), drop std lock, then await.
+    let (sub_mgr, session_holder) = {
+        let connections = state.connections.read().map_err(|e| e.to_string())?;
+        let entry = connections.get(&request.conn_id).ok_or("Connection not found")?;
+        (entry.subscription_mgr.clone(), entry.connection.get_session_holder())
+    };
+    // std lock dropped — safe to await.
+
+    let session_guard = session_holder.read().await;
+    let session = session_guard.as_ref();
+
+    sub_mgr.add_nodes(nodes, session)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn remove_monitored_nodes(
+    state: State<'_, AppState>,
+    conn_id: String,
+    node_ids: Vec<String>,
+) -> Result<(), String> {
+    let sub_mgr = {
+        let connections = state.connections.read().map_err(|e| e.to_string())?;
+        let entry = connections.get(&conn_id).ok_or("Connection not found")?;
+        entry.subscription_mgr.clone()
+    };
+    sub_mgr.remove_nodes(&node_ids)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn get_monitored_data(
+    state: State<'_, AppState>,
+    conn_id: String,
+    since_seq: u64,
+) -> Result<MonitoredDataDto, String> {
+    let sub_mgr = {
+        let connections = state.connections.read().map_err(|e| e.to_string())?;
+        let entry = connections.get(&conn_id).ok_or("Connection not found")?;
+        entry.subscription_mgr.clone()
+    };
+    // std lock dropped — safe to await.
+
+    let nodes = sub_mgr.get_monitored_nodes_since(since_seq).await;
+    let seq = sub_mgr.get_update_seq().await;
+
+    let node_dtos: Vec<MonitoredNodeDto> = nodes.into_iter().map(|n| {
+        let (access_mode_str, interval_ms) = match &n.access_mode {
+            AccessMode::Subscription { interval_ms } => ("Subscription".to_string(), *interval_ms),
+            AccessMode::Polling { interval_ms } => ("Polling".to_string(), *interval_ms as f64),
+        };
+        MonitoredNodeDto {
+            node_id: n.node_id,
+            display_name: n.display_name,
+            browse_path: n.browse_path,
+            data_type: n.data_type,
+            value: n.value,
+            quality: n.quality,
+            timestamp: n.timestamp,
+            access_mode: access_mode_str,
+            interval_ms,
+            group_id: n.group_id,
+        }
+    }).collect();
+
+    Ok(MonitoredDataDto {
+        nodes: node_dtos,
+        seq,
+    })
+}
+
 // ── Endpoint Discovery ──────────────────────────────────────────
 
 #[tauri::command]
 pub async fn get_endpoints(
     url: String,
 ) -> Result<Vec<String>, String> {
-    // TODO: Task 8 will implement actual endpoint discovery via async-opcua.
     Ok(vec![url])
 }
 
@@ -355,7 +609,11 @@ pub async fn load_project(
             timeout_ms: conn_entry.timeout_ms,
         };
         let connection = OpcUaConnection::new(config);
-        connections.insert(id, ConnectionEntry { connection });
+        connections.insert(id, ConnectionEntry {
+            connection,
+            subscription_mgr: SubscriptionManager::new(),
+            polling_mgr: PollingManager::new(),
+        });
     }
 
     let mut groups = state.groups.write().map_err(|e| e.to_string())?;

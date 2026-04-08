@@ -15,6 +15,14 @@ pub fn run() {
             commands::delete_connection,
             commands::list_connections,
             commands::get_endpoints,
+            // Browse commands
+            commands::browse_root,
+            commands::browse_node,
+            commands::read_node_attributes,
+            // Monitor commands
+            commands::add_monitored_nodes,
+            commands::remove_monitored_nodes,
+            commands::get_monitored_data,
             // Log commands
             commands::get_communication_logs,
             commands::clear_communication_logs,

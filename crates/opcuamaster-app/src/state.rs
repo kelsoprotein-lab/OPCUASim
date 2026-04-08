@@ -2,10 +2,15 @@ use std::collections::HashMap;
 use std::sync::RwLock;
 use opcuasim_core::client::OpcUaConnection;
 use opcuasim_core::node::NodeGroup;
+use opcuasim_core::subscription::SubscriptionManager;
+use opcuasim_core::polling::PollingManager;
 use serde::Serialize;
 
 pub struct ConnectionEntry {
     pub connection: OpcUaConnection,
+    pub subscription_mgr: SubscriptionManager,
+    #[allow(dead_code)]
+    pub polling_mgr: PollingManager,
 }
 
 pub struct AppState {
@@ -71,16 +76,36 @@ pub struct ConnectionStateEvent {
     pub state: String,
 }
 
+#[allow(dead_code)]
 #[derive(Clone, Serialize)]
 pub struct DataChangedEvent {
     pub connection_id: String,
     pub items: Vec<DataChangeItemDto>,
 }
 
+#[allow(dead_code)]
 #[derive(Clone, Serialize)]
 pub struct DataChangeItemDto {
     pub node_id: String,
     pub value: String,
     pub quality: String,
     pub timestamp: String,
+}
+
+#[derive(Serialize)]
+pub struct NodeAttributesDto {
+    pub node_id: String,
+    pub display_name: String,
+    pub description: String,
+    pub data_type: String,
+    pub access_level: String,
+    pub value: Option<String>,
+    pub quality: Option<String>,
+    pub timestamp: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct MonitoredDataDto {
+    pub nodes: Vec<MonitoredNodeDto>,
+    pub seq: u64,
 }
