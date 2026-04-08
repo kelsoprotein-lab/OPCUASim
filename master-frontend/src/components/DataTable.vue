@@ -146,6 +146,7 @@ function qualityColor(quality?: string): string {
     <div class="table-header">
       <div class="th col-id">NodeId</div>
       <div class="th col-name">Name</div>
+      <div class="th col-type">Type</div>
       <div class="th col-value">Value</div>
       <div class="th col-quality">Quality</div>
       <div class="th col-time">Time</div>
@@ -173,6 +174,7 @@ function qualityColor(quality?: string): string {
         >
           <div class="td mono col-id" :title="filteredNodes[row.index].node_id">{{ shortNodeId(filteredNodes[row.index].node_id) }}</div>
           <div class="td col-name" :title="filteredNodes[row.index].display_name">{{ filteredNodes[row.index].display_name }}</div>
+          <div class="td col-type" :title="filteredNodes[row.index].data_type">{{ filteredNodes[row.index].data_type || '—' }}</div>
           <div class="td mono col-value value-cell" :title="filteredNodes[row.index].value || ''">{{ filteredNodes[row.index].value || '—' }}</div>
           <div class="td col-quality"><span :style="{ color: qualityColor(filteredNodes[row.index].quality) }">{{ filteredNodes[row.index].quality || '—' }}</span></div>
           <div class="td mono col-time">{{ filteredNodes[row.index].timestamp ? filteredNodes[row.index].timestamp!.substring(11, 19) : '—' }}</div>
@@ -223,6 +225,7 @@ function qualityColor(quality?: string): string {
 
 .col-id { flex: 2; min-width: 100px; }
 .col-name { flex: 3; min-width: 120px; }
+.col-type { flex: 0 0 80px; }
 .col-value { flex: 2; min-width: 80px; }
 .col-quality { flex: 0 0 55px; }
 .col-time { flex: 0 0 70px; }
