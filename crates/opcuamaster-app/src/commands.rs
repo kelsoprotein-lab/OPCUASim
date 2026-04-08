@@ -278,6 +278,64 @@ pub async fn browse_node(
     }).collect())
 }
 
+/// Recursively collect all Variable nodes under a given node and add them to monitoring.
+#[tauri::command]
+pub async fn add_variables_under_node(
+    state: State<'_, AppState>,
+    conn_id: String,
+    node_id: String,
+    access_mode: Option<String>,
+    interval_ms: Option<f64>,
+) -> Result<u32, String> {
+    let session = get_session_from_state(&state, &conn_id).await?;
+
+    let variables = opcuasim_core::browse::collect_variables(&session, &node_id, 10)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if variables.is_empty() {
+        return Ok(0);
+    }
+
+    let interval = interval_ms.unwrap_or(1000.0);
+    let mode = match access_mode.as_deref() {
+        Some("Polling") => AccessMode::Polling { interval_ms: interval as u64 },
+        _ => AccessMode::Subscription { interval_ms: interval },
+    };
+
+    let nodes: Vec<MonitoredNode> = variables.iter().map(|v| {
+        MonitoredNode {
+            node_id: v.node_id.clone(),
+            display_name: v.display_name.clone(),
+            browse_path: String::new(),
+            data_type: v.data_type.clone().unwrap_or_else(|| "Unknown".to_string()),
+            value: None,
+            quality: None,
+            timestamp: None,
+            access_mode: mode.clone(),
+            group_id: None,
+            update_seq: 0,
+        }
+    }).collect();
+
+    let count = nodes.len() as u32;
+
+    let (sub_mgr, session_holder) = {
+        let connections = state.connections.read().map_err(|e| e.to_string())?;
+        let entry = connections.get(&conn_id).ok_or("Connection not found")?;
+        (entry.subscription_mgr.clone(), entry.connection.get_session_holder())
+    };
+
+    let session_guard = session_holder.read().await;
+    let session_ref = session_guard.as_ref();
+
+    sub_mgr.add_nodes(nodes, session_ref)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    Ok(count)
+}
+
 /// Extract the session Arc from state without holding std::sync::RwLock across await.
 /// Clones the session holder Arc synchronously, drops the std lock, then awaits the tokio lock.
 async fn get_session_from_state(

@@ -21,6 +21,7 @@ pub fn run() {
             commands::read_node_attributes,
             // Monitor commands
             commands::add_monitored_nodes,
+            commands::add_variables_under_node,
             commands::remove_monitored_nodes,
             commands::get_monitored_data,
             // Log commands

@@ -71,6 +71,36 @@ pub async fn browse_node(
     Ok(items)
 }
 
+/// Recursively browse a node and collect all Variable descendants.
+pub async fn collect_variables(
+    session: &Arc<Session>,
+    node_id: &str,
+    max_depth: u32,
+) -> Result<Vec<BrowseResultItem>, OpcUaSimError> {
+    let mut variables = Vec::new();
+    let mut stack: Vec<(String, u32)> = vec![(node_id.to_string(), 0)];
+
+    while let Some((current_id, depth)) = stack.pop() {
+        if depth > max_depth {
+            continue;
+        }
+
+        let children = browse_node(session, Some(&current_id)).await?;
+
+        for child in children {
+            if child.node_class == "Variable" {
+                variables.push(child);
+            } else {
+                // Queue non-variable nodes for further browsing
+                stack.push((child.node_id.clone(), depth + 1));
+            }
+        }
+    }
+
+    info!("Collected {} variables under {}", variables.len(), node_id);
+    Ok(variables)
+}
+
 /// Read detailed attributes of a specific node.
 pub async fn read_node_attributes(
     session: &Arc<Session>,

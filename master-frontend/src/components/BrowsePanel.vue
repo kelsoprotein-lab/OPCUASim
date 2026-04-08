@@ -120,6 +120,8 @@ function getCheckedNodes(): TreeNode[] {
   return checked
 }
 
+const adding = ref(false)
+
 async function addToMonitoring() {
   const checked = getCheckedNodes()
   if (checked.length === 0) {
@@ -127,23 +129,52 @@ async function addToMonitoring() {
     return
   }
 
+  adding.value = true
   try {
-    await invoke('add_monitored_nodes', {
-      request: {
-        conn_id: selectedConnectionId.value,
-        nodes: checked.map((n) => ({
-          node_id: n.nodeId,
-          display_name: n.displayName,
-          data_type: n.dataType || 'Unknown',
-          access_mode: accessMode.value === 'polling' ? 'Polling' : 'Subscription',
-          interval_ms: intervalMs.value,
-        })),
-      },
-    })
+    let totalAdded = 0
+
+    // Separate Variable nodes (direct add) from non-Variable nodes (recursive collect)
+    const variables = checked.filter((n) => n.nodeClass === 'Variable')
+    const nonVariables = checked.filter((n) => n.nodeClass !== 'Variable')
+
+    // Direct add Variable nodes
+    if (variables.length > 0) {
+      await invoke('add_monitored_nodes', {
+        request: {
+          conn_id: selectedConnectionId.value,
+          nodes: variables.map((n) => ({
+            node_id: n.nodeId,
+            display_name: n.displayName,
+            data_type: n.dataType || 'Unknown',
+            access_mode: accessMode.value === 'polling' ? 'Polling' : 'Subscription',
+            interval_ms: intervalMs.value,
+          })),
+        },
+      })
+      totalAdded += variables.length
+    }
+
+    // For non-Variable nodes, recursively collect all Variables underneath
+    for (const node of nonVariables) {
+      const count = await invoke<number>('add_variables_under_node', {
+        connId: selectedConnectionId.value,
+        nodeId: node.nodeId,
+        accessMode: accessMode.value === 'polling' ? 'Polling' : 'Subscription',
+        intervalMs: intervalMs.value,
+      })
+      totalAdded += count
+    }
+
     refreshData()
-    emit('close')
+    if (totalAdded > 0) {
+      emit('close')
+    } else {
+      await dialog.showAlert('No Variables Found', 'No Variable nodes found under the selected nodes.')
+    }
   } catch (e) {
     await dialog.showAlert('Error', String(e))
+  } finally {
+    adding.value = false
   }
 }
 
@@ -203,8 +234,8 @@ watch(() => props.visible, (v) => {
           </div>
           <div class="footer-actions">
             <button class="btn btn-cancel" @click="emit('close')">Cancel</button>
-            <button class="btn btn-confirm" @click="addToMonitoring">
-              Add {{ getCheckedNodes().length || '' }} Node{{ getCheckedNodes().length !== 1 ? 's' : '' }}
+            <button class="btn btn-confirm" :disabled="adding" @click="addToMonitoring">
+              {{ adding ? 'Scanning...' : `Add ${getCheckedNodes().length || ''} Node${getCheckedNodes().length !== 1 ? 's' : ''}` }}
             </button>
           </div>
         </div>
