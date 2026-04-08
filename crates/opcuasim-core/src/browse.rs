@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use opcua_client::Session;
+use log::info;
 use opcua_types::{
     AttributeId, BrowseDescription, BrowseDirection, NodeClass, NodeId,
     ReadValueId, ReferenceTypeId, TimestampsToReturn,
@@ -20,10 +21,12 @@ pub async fn browse_node(
         None => NodeId::objects_folder_id(),
     };
 
+    info!("Browsing node: {:?}", node_id);
+
     let browse_desc = vec![BrowseDescription {
         node_id: target_node,
         browse_direction: BrowseDirection::Forward,
-        reference_type_id: ReferenceTypeId::HierarchicalReferences.into(),
+        reference_type_id: ReferenceTypeId::References.into(), // Most permissive — all reference types
         include_subtypes: true,
         node_class_mask: 0,
         result_mask: 0x3F, // All fields
@@ -50,8 +53,8 @@ pub async fn browse_node(
                     _ => "Unspecified",
                 };
 
-                // An Object or ObjectType likely has children; Variable typically doesn't
-                let has_children = matches!(r.node_class, NodeClass::Object | NodeClass::ObjectType | NodeClass::View);
+                // Default to true — let actual browse determine if children exist
+                let has_children = true;
 
                 items.push(BrowseResultItem {
                     node_id: r.node_id.node_id.to_string(),
@@ -64,6 +67,7 @@ pub async fn browse_node(
         }
     }
 
+    info!("Browse returned {} items for {:?}", items.len(), node_id);
     Ok(items)
 }
 

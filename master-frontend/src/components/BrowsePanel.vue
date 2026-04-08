@@ -94,8 +94,15 @@ async function toggleExpand(node: TreeNode) {
       })
       node.children = results.map((r) => toTreeNode(r, node.depth + 1))
       node.loaded = true
+      // If no children found, hide expand arrow
+      if (node.children.length === 0) {
+        node.hasChildren = false
+        return
+      }
     } catch (e) {
       console.error('Browse node failed:', e)
+      node.hasChildren = false
+      return
     }
   }
   node.expanded = !node.expanded
