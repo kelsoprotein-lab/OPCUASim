@@ -23,7 +23,7 @@ A **simulation/testing tool** that exposes a configurable OPC UA address space w
 | Desktop | Tauri 2 |
 | Frontend | Vue 3 + TypeScript, Composition API, `@tanstack/vue-virtual` |
 | Shared | `opcuasim-core` (extended), `shared-frontend` |
-| Expression engine | `evalexpr` or `meval` (lightweight Rust expression evaluator) |
+| Expression engine | `evalexpr` (supports custom variable/function injection for `t`, `i`, `rand()`, etc.) |
 
 ## 2. Architecture
 
