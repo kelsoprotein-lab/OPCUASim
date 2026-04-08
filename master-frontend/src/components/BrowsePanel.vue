@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, inject, watch, type Ref } from 'vue'
+import { ref, inject, watch, computed, type Ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import type { BrowseResult } from '../types'
 import { dialogKey } from '../composables/useDialog'
@@ -26,12 +26,26 @@ interface TreeNode {
   expanded: boolean
   loaded: boolean
   checked: boolean
+  depth: number
 }
 
 const rootNodes = ref<TreeNode[]>([])
 const loading = ref(false)
 const accessMode = ref<'subscription' | 'polling'>('subscription')
 const intervalMs = ref(1000)
+
+// Flatten the tree for rendering (supports infinite depth)
+const flatNodes = computed(() => {
+  const result: TreeNode[] = []
+  function walk(nodes: TreeNode[]) {
+    for (const n of nodes) {
+      result.push(n)
+      if (n.expanded) walk(n.children)
+    }
+  }
+  walk(rootNodes.value)
+  return result
+})
 
 async function loadRootNodes() {
   if (!selectedConnectionId.value) {
@@ -42,12 +56,10 @@ async function loadRootNodes() {
   loading.value = true
   rootNodes.value = []
   try {
-    console.log('Browsing root for connection:', selectedConnectionId.value)
     const results = await invoke<BrowseResult[]>('browse_root', {
       connId: selectedConnectionId.value,
     })
-    console.log('Browse results:', results)
-    rootNodes.value = results.map(toTreeNode)
+    rootNodes.value = results.map((r) => toTreeNode(r, 0))
   } catch (e) {
     console.error('Browse failed:', e)
     await dialog.showAlert('Browse Error', String(e))
@@ -57,7 +69,7 @@ async function loadRootNodes() {
   }
 }
 
-function toTreeNode(r: BrowseResult): TreeNode {
+function toTreeNode(r: BrowseResult, depth: number): TreeNode {
   return {
     nodeId: r.node_id,
     displayName: r.display_name,
@@ -68,6 +80,7 @@ function toTreeNode(r: BrowseResult): TreeNode {
     expanded: false,
     loaded: false,
     checked: false,
+    depth,
   }
 }
 
@@ -79,7 +92,7 @@ async function toggleExpand(node: TreeNode) {
         connId: selectedConnectionId.value,
         nodeId: node.nodeId,
       })
-      node.children = results.map(toTreeNode)
+      node.children = results.map((r) => toTreeNode(r, node.depth + 1))
       node.loaded = true
     } catch (e) {
       console.error('Browse node failed:', e)
@@ -103,7 +116,7 @@ function getCheckedNodes(): TreeNode[] {
 async function addToMonitoring() {
   const checked = getCheckedNodes()
   if (checked.length === 0) {
-    await dialog.showAlert('No Selection', 'Please select at least one node.')
+    await dialog.showAlert('No Selection', 'Please check at least one node.')
     return
   }
 
@@ -127,7 +140,6 @@ async function addToMonitoring() {
   }
 }
 
-// Load root when opened
 watch(() => props.visible, (v) => {
   if (v) loadRootNodes()
 })
@@ -139,48 +151,33 @@ watch(() => props.visible, (v) => {
       <div class="browse-dialog">
         <div class="browse-header">
           <span class="browse-title">Browse Server Nodes</span>
+          <span class="browse-hint">Expand folders to find Variable nodes with values</span>
           <button class="close-btn" @click="emit('close')">✕</button>
         </div>
 
         <div class="browse-body">
           <div v-if="loading" class="loading-hint">Loading...</div>
           <div v-else-if="rootNodes.length === 0" class="loading-hint">
-            No nodes found. The server may not be connected or browse is not yet implemented.
+            No nodes found.
           </div>
           <div v-else class="node-tree">
-            <template v-for="node in rootNodes" :key="node.nodeId">
-              <div class="tree-row" :style="{ paddingLeft: '12px' }">
-                <span
-                  class="expand-arrow"
-                  :class="{ invisible: !node.hasChildren }"
-                  @click="toggleExpand(node)"
-                >{{ node.expanded ? '▾' : '▸' }}</span>
-                <input v-if="node.nodeClass === 'Variable'" type="checkbox" v-model="node.checked" class="node-check" />
-                <span v-else class="node-check-spacer" />
-                <span class="node-name" @click="toggleExpand(node)">{{ node.displayName }}</span>
-                <span class="node-class">{{ node.nodeClass }}</span>
-                <span v-if="node.dataType" class="node-type">{{ node.dataType }}</span>
-              </div>
-              <template v-if="node.expanded">
-                <div
-                  v-for="child in node.children"
-                  :key="child.nodeId"
-                  class="tree-row"
-                  :style="{ paddingLeft: '32px' }"
-                >
-                  <span
-                    class="expand-arrow"
-                    :class="{ invisible: !child.hasChildren }"
-                    @click="toggleExpand(child)"
-                  >{{ child.expanded ? '▾' : '▸' }}</span>
-                  <input v-if="child.nodeClass === 'Variable'" type="checkbox" v-model="child.checked" class="node-check" />
-                  <span v-else class="node-check-spacer" />
-                  <span class="node-name" @click="toggleExpand(child)">{{ child.displayName }}</span>
-                  <span class="node-class">{{ child.nodeClass }}</span>
-                  <span v-if="child.dataType" class="node-type">{{ child.dataType }}</span>
-                </div>
-              </template>
-            </template>
+            <div
+              v-for="node in flatNodes"
+              :key="node.nodeId"
+              class="tree-row"
+              :style="{ paddingLeft: (12 + node.depth * 20) + 'px' }"
+            >
+              <span
+                class="expand-arrow"
+                :class="{ invisible: !node.hasChildren }"
+                @click="toggleExpand(node)"
+              >{{ node.expanded ? '▾' : '▸' }}</span>
+              <input type="checkbox" v-model="node.checked" class="node-check" />
+              <span class="node-name" @click="node.hasChildren ? toggleExpand(node) : (node.checked = !node.checked)">
+                {{ node.displayName }}
+              </span>
+              <span :class="['node-class', { variable: node.nodeClass === 'Variable' }]">{{ node.nodeClass }}</span>
+            </div>
           </div>
         </div>
 
@@ -199,7 +196,9 @@ watch(() => props.visible, (v) => {
           </div>
           <div class="footer-actions">
             <button class="btn btn-cancel" @click="emit('close')">Cancel</button>
-            <button class="btn btn-confirm" @click="addToMonitoring">Add to Monitoring</button>
+            <button class="btn btn-confirm" @click="addToMonitoring">
+              Add {{ getCheckedNodes().length || '' }} Node{{ getCheckedNodes().length !== 1 ? 's' : '' }}
+            </button>
           </div>
         </div>
       </div>
@@ -222,8 +221,8 @@ watch(() => props.visible, (v) => {
   background: #1e1e2e;
   border: 1px solid #313244;
   border-radius: 8px;
-  width: 600px;
-  height: 500px;
+  width: 700px;
+  height: 550px;
   display: flex;
   flex-direction: column;
 }
@@ -231,7 +230,7 @@ watch(() => props.visible, (v) => {
 .browse-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 12px;
   padding: 12px 16px;
   border-bottom: 1px solid #313244;
 }
@@ -240,6 +239,12 @@ watch(() => props.visible, (v) => {
   font-size: 14px;
   font-weight: 600;
   color: #cdd6f4;
+}
+
+.browse-hint {
+  font-size: 11px;
+  color: #585b70;
+  flex: 1;
 }
 
 .close-btn {
@@ -257,7 +262,7 @@ watch(() => props.visible, (v) => {
 .browse-body {
   flex: 1;
   overflow-y: auto;
-  padding: 8px 0;
+  padding: 4px 0;
 }
 
 .loading-hint {
@@ -271,7 +276,7 @@ watch(() => props.visible, (v) => {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 8px;
+  padding: 3px 8px;
   font-size: 13px;
 }
 
@@ -297,11 +302,6 @@ watch(() => props.visible, (v) => {
   flex-shrink: 0;
 }
 
-.node-check-spacer {
-  width: 13px;
-  flex-shrink: 0;
-}
-
 .node-name {
   color: #cdd6f4;
   cursor: pointer;
@@ -315,12 +315,14 @@ watch(() => props.visible, (v) => {
   color: #585b70;
   font-size: 11px;
   flex-shrink: 0;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: #313244;
 }
 
-.node-type {
-  color: #89b4fa;
-  font-size: 11px;
-  flex-shrink: 0;
+.node-class.variable {
+  color: #a6e3a1;
+  background: rgba(166, 227, 161, 0.1);
 }
 
 .browse-footer {
