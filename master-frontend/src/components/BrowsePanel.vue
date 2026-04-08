@@ -102,14 +102,16 @@ async function addToMonitoring() {
 
   try {
     await invoke('add_monitored_nodes', {
-      connId: selectedConnectionId.value,
-      nodes: checked.map((n) => ({
-        node_id: n.nodeId,
-        display_name: n.displayName,
-        data_type: n.dataType || 'Unknown',
-      })),
-      accessMode: accessMode.value,
-      intervalMs: intervalMs.value,
+      request: {
+        conn_id: selectedConnectionId.value,
+        nodes: checked.map((n) => ({
+          node_id: n.nodeId,
+          display_name: n.displayName,
+          data_type: n.dataType || 'Unknown',
+          access_mode: accessMode.value === 'polling' ? 'Polling' : 'Subscription',
+          interval_ms: intervalMs.value,
+        })),
+      },
     })
     refreshData()
     emit('close')
