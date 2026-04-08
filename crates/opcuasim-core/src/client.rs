@@ -156,8 +156,11 @@ impl OpcUaConnection {
             .keep_alive_interval(std::time::Duration::from_secs(5))
             .request_timeout(std::time::Duration::from_secs(30))
             .max_array_length(65535)
-            .max_message_size(64 * 1024 * 1024)
             .max_string_length(65535)
+            .max_message_size(128 * 1024 * 1024) // 128MB
+            .max_chunk_size(65535)
+            .max_incoming_chunk_size(65535 * 4)
+            .max_chunk_count(1024)
             .client()
             .map_err(|errs| OpcUaSimError::ConnectionFailed(errs.join("; ")))?;
 

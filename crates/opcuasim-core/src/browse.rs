@@ -85,14 +85,19 @@ pub async fn collect_variables(
             continue;
         }
 
-        let children = browse_node(session, Some(&current_id)).await?;
-
-        for child in children {
-            if child.node_class == "Variable" {
-                variables.push(child);
-            } else {
-                // Queue non-variable nodes for further browsing
-                stack.push((child.node_id.clone(), depth + 1));
+        match browse_node(session, Some(&current_id)).await {
+            Ok(children) => {
+                for child in children {
+                    if child.node_class == "Variable" {
+                        variables.push(child);
+                    } else {
+                        stack.push((child.node_id.clone(), depth + 1));
+                    }
+                }
+            }
+            Err(e) => {
+                info!("Skipping node {} during variable collection: {}", current_id, e);
+                continue;
             }
         }
     }
