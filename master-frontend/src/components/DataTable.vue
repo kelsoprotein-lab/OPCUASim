@@ -20,11 +20,11 @@ async function loadData() {
     return
   }
   try {
-    const data = await invoke<MonitoredNodeInfo[]>('get_monitored_data', {
-      connId: selectedConnectionId.value,
-      sinceSeq: 0,
-    }).catch(() => [])
-    nodes.value = data
+    const data = await invoke<{ nodes: MonitoredNodeInfo[], seq: number }>('get_monitored_data', {
+      conn_id: selectedConnectionId.value,
+      since_seq: 0,
+    }).catch(() => ({ nodes: [], seq: 0 }))
+    nodes.value = data.nodes
   } catch {
     // get_monitored_data not registered yet — expected until Task 8
   }

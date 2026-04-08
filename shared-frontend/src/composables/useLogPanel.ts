@@ -14,8 +14,8 @@ export function useLogPanel() {
     loading.value = true
     try {
       logs.value = await invoke<LogEntry[]>('get_communication_logs', {
-        connId: connectionId,
-        sinceSeq: 0,
+        conn_id: connectionId,
+        since_seq: 0,
       })
     } catch (e) {
       console.error('Failed to load logs:', e)
@@ -27,7 +27,7 @@ export function useLogPanel() {
   async function clearLogs(connectionId: string | null) {
     if (!connectionId) return
     try {
-      await invoke('clear_communication_logs', { connId: connectionId })
+      await invoke('clear_communication_logs', { conn_id: connectionId })
       logs.value = []
     } catch (e) {
       console.error('Failed to clear logs:', e)
@@ -37,7 +37,7 @@ export function useLogPanel() {
   async function exportLogsCsv(connectionId: string | null) {
     if (!connectionId) return
     try {
-      const csv = await invoke<string>('export_logs_csv', { connId: connectionId })
+      const csv = await invoke<string>('export_logs_csv', { conn_id: connectionId })
       const blob = new Blob([csv], { type: 'text/csv' })
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')

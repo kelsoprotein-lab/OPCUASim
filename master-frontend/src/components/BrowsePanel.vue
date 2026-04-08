@@ -44,7 +44,7 @@ async function loadRootNodes() {
   try {
     console.log('Browsing root for connection:', selectedConnectionId.value)
     const results = await invoke<BrowseResult[]>('browse_root', {
-      connId: selectedConnectionId.value,
+      conn_id: selectedConnectionId.value,
     })
     console.log('Browse results:', results)
     rootNodes.value = results.map(toTreeNode)
@@ -76,8 +76,8 @@ async function toggleExpand(node: TreeNode) {
   if (!node.loaded) {
     try {
       const results = await invoke<BrowseResult[]>('browse_node', {
-        connId: selectedConnectionId.value,
-        nodeId: node.nodeId,
+        conn_id: selectedConnectionId.value,
+        node_id: node.nodeId,
       })
       node.children = results.map(toTreeNode)
       node.loaded = true

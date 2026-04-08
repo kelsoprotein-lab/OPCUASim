@@ -119,6 +119,8 @@ pub async fn connect(
                 let mut connections = state.connections.write().map_err(|e| e.to_string())?;
                 if let Some(entry) = connections.get_mut(&id) {
                     entry.connection = temp_conn;
+                    // Reset subscription manager for the new session
+                    entry.subscription_mgr = SubscriptionManager::new();
                 }
             }
 
