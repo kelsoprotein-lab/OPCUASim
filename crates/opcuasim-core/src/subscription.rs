@@ -103,12 +103,15 @@ impl SubscriptionManager {
                 .as_ref()
                 .map(|s| format!("{}", s))
                 .unwrap_or_else(|| "Good".to_string());
-            let timestamp_str = data_value.source_timestamp
+            let source_ts = data_value.source_timestamp
+                .as_ref()
+                .map(|t| t.to_string())
+                .unwrap_or_default();
+            let server_ts = data_value.server_timestamp
                 .as_ref()
                 .map(|t| t.to_string())
                 .unwrap_or_default();
 
-            // We must use a blocking approach here since callback is FnMut, not async
             let items = monitored_items.clone();
             let seq = update_seq.clone();
             tokio::spawn(async move {
@@ -118,7 +121,8 @@ impl SubscriptionManager {
                     *seq_val += 1;
                     node.value = Some(value_str);
                     node.quality = Some(quality_str);
-                    node.timestamp = Some(timestamp_str);
+                    node.timestamp = Some(source_ts);
+                    node.server_timestamp = Some(server_ts);
                     node.update_seq = *seq_val;
                 }
             });
@@ -183,20 +187,21 @@ impl SubscriptionManager {
 
                         let value = val_dv.and_then(|dv| dv.value.as_ref()).map(|v| format!("{}", v));
                         let quality = val_dv.and_then(|dv| dv.status.as_ref()).map(|s| format!("{}", s));
-                        let timestamp = val_dv.and_then(|dv| dv.source_timestamp.as_ref()).map(|t| t.to_string());
+                        let source_ts = val_dv.and_then(|dv| dv.source_timestamp.as_ref()).map(|t| t.to_string());
+                        let server_ts = val_dv.and_then(|dv| dv.server_timestamp.as_ref()).map(|t| t.to_string());
                         let is_value_ok = quality.as_deref() != Some("BadAttributeIdInvalid");
 
                         if let Some(n) = items.get_mut(&nodes[*node_idx].node_id) {
                             *seq += 1;
+                            n.data_type = data_type;
+                            n.timestamp = source_ts;
+                            n.server_timestamp = server_ts;
                             if is_value_ok {
                                 n.value = value;
                                 n.quality = Some(quality.unwrap_or_else(|| "Good".to_string()));
-                                n.timestamp = timestamp;
-                                n.data_type = data_type;
                             } else {
                                 n.value = None;
                                 n.quality = Some("N/A".to_string());
-                                n.data_type = data_type;
                             }
                             n.update_seq = *seq;
                         }

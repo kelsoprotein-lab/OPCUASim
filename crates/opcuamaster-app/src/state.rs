@@ -58,6 +58,8 @@ pub struct MonitoredNodeDto {
     pub value: Option<String>,
     pub quality: Option<String>,
     pub timestamp: Option<String>,
+    pub source_timestamp: Option<String>,
+    pub server_timestamp: Option<String>,
     pub access_mode: String,
     pub interval_ms: f64,
     pub group_id: Option<String>,

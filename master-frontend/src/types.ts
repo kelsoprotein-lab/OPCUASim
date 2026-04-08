@@ -24,6 +24,8 @@ export interface MonitoredNodeInfo {
   value?: string
   quality?: string
   timestamp?: string
+  source_timestamp?: string
+  server_timestamp?: string
   access_mode: string
   interval_ms: number
   group_id?: string

@@ -149,7 +149,8 @@ function qualityColor(quality?: string): string {
       <div class="th col-type">Type</div>
       <div class="th col-value">Value</div>
       <div class="th col-quality">Quality</div>
-      <div class="th col-time">Time</div>
+      <div class="th col-time">Source Time</div>
+      <div class="th col-time">Server Time</div>
       <div class="th col-mode">Mode</div>
     </div>
 
@@ -177,7 +178,8 @@ function qualityColor(quality?: string): string {
           <div class="td col-type" :title="filteredNodes[row.index].data_type">{{ filteredNodes[row.index].data_type || '—' }}</div>
           <div class="td mono col-value value-cell" :title="filteredNodes[row.index].value || ''">{{ filteredNodes[row.index].value || '—' }}</div>
           <div class="td col-quality"><span :style="{ color: qualityColor(filteredNodes[row.index].quality) }">{{ filteredNodes[row.index].quality || '—' }}</span></div>
-          <div class="td mono col-time">{{ filteredNodes[row.index].timestamp ? filteredNodes[row.index].timestamp!.substring(11, 19) : '—' }}</div>
+          <div class="td mono col-time">{{ filteredNodes[row.index].source_timestamp ? filteredNodes[row.index].source_timestamp!.substring(11, 19) : '—' }}</div>
+          <div class="td mono col-time">{{ filteredNodes[row.index].server_timestamp ? filteredNodes[row.index].server_timestamp!.substring(11, 19) : '—' }}</div>
           <div class="td col-mode"><span class="mode-badge">{{ filteredNodes[row.index].access_mode === 'Subscription' ? 'Sub' : 'Poll' }}</span></div>
         </div>
       </div>
