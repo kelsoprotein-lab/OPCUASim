@@ -173,28 +173,16 @@ impl OpcUaConnection {
             UserTokenPolicy::anonymous(),
         ).into();
 
-        // Try connect_to_matching_endpoint first (does endpoint discovery),
-        // fall back to connect_to_endpoint_directly
-        let connect_result = client
-            .connect_to_matching_endpoint(endpoint.clone(), identity_token.clone())
-            .await;
-
-        let (session, event_loop) = match connect_result {
-            Ok(result) => result,
-            Err(e) => {
-                info!("Endpoint discovery failed ({}), trying direct connection...", e);
-                self.log_response("Session", &format!("Discovery failed: {}, trying direct...", e), None);
-                client
-                    .connect_to_endpoint_directly(endpoint, identity_token)
-                    .map_err(|e| OpcUaSimError::ConnectionFailed(e.to_string()))?
-            }
-        };
+        // Use direct connection (skip endpoint discovery which often times out)
+        let (session, event_loop) = client
+            .connect_to_endpoint_directly(endpoint, identity_token)
+            .map_err(|e| OpcUaSimError::ConnectionFailed(e.to_string()))?;
 
         // Spawn the event loop
         let handle = event_loop.spawn();
 
-        // Wait for connection with timeout
-        let timeout_ms = self.config.timeout_ms.max(5000);
+        // Wait for connection with timeout (30s minimum for slow servers)
+        let timeout_ms = self.config.timeout_ms.max(30000);
         let wait_result = tokio::time::timeout(
             std::time::Duration::from_millis(timeout_ms),
             session.wait_for_connection(),
