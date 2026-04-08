@@ -120,12 +120,12 @@ function qualityColor(quality?: string): string {
 
     <!-- Table header -->
     <div class="table-header">
-      <div class="th" style="width: 180px">NodeId</div>
-      <div class="th" style="flex: 1; min-width: 200px">Name</div>
-      <div class="th" style="width: 100px">Value</div>
-      <div class="th" style="width: 55px">Quality</div>
-      <div class="th" style="width: 140px">Timestamp</div>
-      <div class="th" style="width: 70px">Mode</div>
+      <div class="th col-id">NodeId</div>
+      <div class="th col-name">Name</div>
+      <div class="th col-value">Value</div>
+      <div class="th col-quality">Quality</div>
+      <div class="th col-time">Time</div>
+      <div class="th col-mode">Mode</div>
     </div>
 
     <!-- Table body -->
@@ -139,24 +139,12 @@ function qualityColor(quality?: string): string {
         :class="['table-row', { selected: isSelected(node), alt: i % 2 === 1 }]"
         @click="selectNode(node, $event)"
       >
-        <div class="td mono" style="width: 180px" :title="node.node_id">
-          {{ shortNodeId(node.node_id) }}
-        </div>
-        <div class="td" style="flex: 1; min-width: 200px" :title="node.display_name">
-          {{ node.display_name }}
-        </div>
-        <div class="td mono value-cell" style="width: 100px" :title="node.value || ''">
-          {{ node.value || '—' }}
-        </div>
-        <div class="td" style="width: 55px">
-          <span :style="{ color: qualityColor(node.quality) }">{{ node.quality || '—' }}</span>
-        </div>
-        <div class="td mono" style="width: 140px" :title="node.timestamp || ''">
-          {{ node.timestamp ? node.timestamp.substring(11, 19) : '—' }}
-        </div>
-        <div class="td" style="width: 70px">
-          <span class="mode-badge">{{ node.access_mode === 'Subscription' ? 'Sub' : 'Poll' }}</span>
-        </div>
+        <div class="td mono col-id" :title="node.node_id">{{ shortNodeId(node.node_id) }}</div>
+        <div class="td col-name" :title="node.display_name">{{ node.display_name }}</div>
+        <div class="td mono col-value value-cell" :title="node.value || ''">{{ node.value || '—' }}</div>
+        <div class="td col-quality"><span :style="{ color: qualityColor(node.quality) }">{{ node.quality || '—' }}</span></div>
+        <div class="td mono col-time" :title="node.timestamp || ''">{{ node.timestamp ? node.timestamp.substring(11, 19) : '—' }}</div>
+        <div class="td col-mode"><span class="mode-badge">{{ node.access_mode === 'Subscription' ? 'Sub' : 'Poll' }}</span></div>
       </div>
     </div>
   </div>
@@ -199,6 +187,14 @@ function qualityColor(quality?: string): string {
   color: #585b70;
   white-space: nowrap;
 }
+
+/* Column widths — flex ratios for responsive layout */
+.col-id { flex: 2; min-width: 100px; }
+.col-name { flex: 3; min-width: 120px; }
+.col-value { flex: 2; min-width: 80px; }
+.col-quality { flex: 0 0 55px; }
+.col-time { flex: 0 0 70px; }
+.col-mode { flex: 0 0 45px; }
 
 .table-header {
   display: flex;
