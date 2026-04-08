@@ -108,9 +108,9 @@ impl SubscriptionManager {
         let sub_id = session
             .create_subscription(
                 Duration::from_millis(1000),  // publishing interval
-                10,   // lifetime count
-                30,   // max keep alive count
-                0,    // max notifications per publish
+                300,  // lifetime count (must be >= 3 * max_keep_alive_count)
+                10,   // max keep alive count
+                0,    // max notifications per publish (0 = unlimited)
                 0,    // priority
                 true, // publishing enabled
                 callback,

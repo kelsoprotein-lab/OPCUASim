@@ -34,16 +34,23 @@ const accessMode = ref<'subscription' | 'polling'>('subscription')
 const intervalMs = ref(1000)
 
 async function loadRootNodes() {
-  if (!selectedConnectionId.value) return
+  if (!selectedConnectionId.value) {
+    await dialog.showAlert('No Connection', 'Please select a connection first.')
+    emit('close')
+    return
+  }
   loading.value = true
+  rootNodes.value = []
   try {
+    console.log('Browsing root for connection:', selectedConnectionId.value)
     const results = await invoke<BrowseResult[]>('browse_root', {
       connId: selectedConnectionId.value,
     })
+    console.log('Browse results:', results)
     rootNodes.value = results.map(toTreeNode)
   } catch (e) {
     console.error('Browse failed:', e)
-    // For now, show a hint that browse is not yet implemented
+    await dialog.showAlert('Browse Error', String(e))
     rootNodes.value = []
   } finally {
     loading.value = false
