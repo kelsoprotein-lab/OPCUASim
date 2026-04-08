@@ -155,7 +155,8 @@ watch(() => props.visible, (v) => {
                   :class="{ invisible: !node.hasChildren }"
                   @click="toggleExpand(node)"
                 >{{ node.expanded ? '▾' : '▸' }}</span>
-                <input type="checkbox" v-model="node.checked" class="node-check" />
+                <input v-if="node.nodeClass === 'Variable'" type="checkbox" v-model="node.checked" class="node-check" />
+                <span v-else class="node-check-spacer" />
                 <span class="node-name" @click="toggleExpand(node)">{{ node.displayName }}</span>
                 <span class="node-class">{{ node.nodeClass }}</span>
                 <span v-if="node.dataType" class="node-type">{{ node.dataType }}</span>
@@ -172,7 +173,8 @@ watch(() => props.visible, (v) => {
                     :class="{ invisible: !child.hasChildren }"
                     @click="toggleExpand(child)"
                   >{{ child.expanded ? '▾' : '▸' }}</span>
-                  <input type="checkbox" v-model="child.checked" class="node-check" />
+                  <input v-if="child.nodeClass === 'Variable'" type="checkbox" v-model="child.checked" class="node-check" />
+                  <span v-else class="node-check-spacer" />
                   <span class="node-name" @click="toggleExpand(child)">{{ child.displayName }}</span>
                   <span class="node-class">{{ child.nodeClass }}</span>
                   <span v-if="child.dataType" class="node-type">{{ child.dataType }}</span>
@@ -292,6 +294,11 @@ watch(() => props.visible, (v) => {
 
 .node-check {
   accent-color: #89b4fa;
+  flex-shrink: 0;
+}
+
+.node-check-spacer {
+  width: 13px;
   flex-shrink: 0;
 }
 

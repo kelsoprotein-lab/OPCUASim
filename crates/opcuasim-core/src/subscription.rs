@@ -132,41 +132,48 @@ impl SubscriptionManager {
         Ok(sub_id)
     }
 
-    /// Read current values for nodes immediately after adding them
+    /// Read current values for nodes immediately after adding them.
+    /// Reads each node individually to avoid one bad node failing the entire batch.
     async fn initial_read(&self, session: &Arc<Session>, nodes: &[MonitoredNode]) {
-        let read_ids: Vec<ReadValueId> = nodes.iter()
-            .filter_map(|n| n.node_id.parse::<NodeId>().ok().map(ReadValueId::from))
-            .collect();
+        let mut items = self.monitored_items.write().await;
+        let mut seq = self.update_seq.write().await;
 
-        if read_ids.is_empty() {
-            return;
-        }
+        for node in nodes {
+            let node_id = match node.node_id.parse::<NodeId>() {
+                Ok(nid) => nid,
+                Err(_) => continue,
+            };
 
-        match session.read(&read_ids, TimestampsToReturn::Both, 0.0).await {
-            Ok(values) => {
-                let mut items = self.monitored_items.write().await;
-                let mut seq = self.update_seq.write().await;
-                for (i, dv) in values.iter().enumerate() {
-                    if i < nodes.len() {
-                        if let Some(node) = items.get_mut(&nodes[i].node_id) {
+            let read_ids = vec![ReadValueId::from(node_id)];
+            match session.read(&read_ids, TimestampsToReturn::Both, 0.0).await {
+                Ok(values) => {
+                    if let Some(dv) = values.first() {
+                        if let Some(n) = items.get_mut(&node.node_id) {
                             *seq += 1;
-                            node.value = dv.value.as_ref().map(|v| format!("{}", v));
-                            node.quality = Some(
+                            n.value = dv.value.as_ref().map(|v| format!("{}", v));
+                            n.quality = Some(
                                 dv.status.as_ref()
                                     .map(|s| format!("{}", s))
                                     .unwrap_or_else(|| "Good".to_string())
                             );
-                            node.timestamp = dv.source_timestamp.as_ref().map(|t| t.to_string());
-                            node.update_seq = *seq;
+                            n.timestamp = dv.source_timestamp.as_ref().map(|t| t.to_string());
+                            n.update_seq = *seq;
+                            info!("Initial read for {}: value={:?}", node.node_id, n.value);
                         }
                     }
                 }
-                info!("Initial read completed for {} nodes", values.len());
-            }
-            Err(e) => {
-                info!("Initial read failed (non-critical): {}", e);
+                Err(e) => {
+                    // Mark the node so it shows up in DataTable even if read fails
+                    if let Some(n) = items.get_mut(&node.node_id) {
+                        *seq += 1;
+                        n.quality = Some(format!("ReadError: {}", e));
+                        n.update_seq = *seq;
+                    }
+                    info!("Initial read failed for {}: {}", node.node_id, e);
+                }
             }
         }
+        info!("Initial read completed for {} nodes", nodes.len());
     }
 
     pub async fn remove_nodes(&self, node_ids: &[String]) -> Result<(), OpcUaSimError> {
