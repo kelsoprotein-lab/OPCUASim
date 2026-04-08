@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { inject, computed, type Ref } from 'vue'
+import { ref, inject, computed, type Ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { save, open } from '@tauri-apps/plugin-dialog'
 import { dialogKey } from '../composables/useDialog'
+import ConnectionDialog from './ConnectionDialog.vue'
+import type { ConnectionFormData } from './ConnectionDialog.vue'
 
 const emit = defineEmits<{
   browse: []
@@ -18,15 +20,23 @@ const hasConnection = computed(() => selectedConnectionId.value !== null)
 const isConnected = computed(() => selectedConnectionState.value === 'Connected')
 const isDisconnected = computed(() => selectedConnectionState.value === 'Disconnected')
 
-async function newConnection() {
-  const name = await dialog.showPrompt('New Connection', 'Connection name:', 'Local Server')
-  if (!name) return
-  const url = await dialog.showPrompt('Endpoint URL', 'OPC UA endpoint:', 'opc.tcp://localhost:4840')
-  if (!url) return
+const showNewConnDialog = ref(false)
 
+async function onNewConnectionSubmit(config: ConnectionFormData) {
+  showNewConnDialog.value = false
   try {
     await invoke('create_connection', {
-      request: { name, endpoint_url: url }
+      request: {
+        name: config.name,
+        endpoint_url: config.endpoint_url,
+        security_policy: config.security_policy,
+        security_mode: config.security_mode,
+        auth_type: config.auth_type,
+        username: config.username || undefined,
+        password: config.password || undefined,
+        cert_path: config.cert_path || undefined,
+        key_path: config.key_path || undefined,
+      }
     })
     refreshTree()
   } catch (e) {
@@ -117,7 +127,7 @@ async function exportLogs() {
 
 <template>
   <div class="toolbar">
-    <button class="tb-btn" @click="newConnection">New Connection</button>
+    <button class="tb-btn" @click="showNewConnDialog = true">New Connection</button>
     <button class="tb-btn" :disabled="!hasConnection || isConnected" @click="connectSelected">Connect</button>
     <button class="tb-btn" :disabled="!hasConnection || isDisconnected" @click="disconnectSelected">Disconnect</button>
     <button class="tb-btn" :disabled="!hasConnection" @click="deleteSelected">Delete</button>
@@ -135,6 +145,12 @@ async function exportLogs() {
 
     <button class="tb-btn" :disabled="!hasConnection" @click="exportLogs">Export Logs</button>
   </div>
+
+  <ConnectionDialog
+    :visible="showNewConnDialog"
+    @close="showNewConnDialog = false"
+    @submit="onNewConnectionSubmit"
+  />
 </template>
 
 <style scoped>
