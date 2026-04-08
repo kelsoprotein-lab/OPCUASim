@@ -52,10 +52,24 @@ impl SubscriptionManager {
                 .collect();
 
             if !items_to_create.is_empty() {
-                session
-                    .create_monitored_items(sub_id, TimestampsToReturn::Both, items_to_create)
-                    .await
-                    .map_err(|e| OpcUaSimError::SubscriptionError(format!("Create monitored items failed: {}", e)))?;
+                match session.create_monitored_items(sub_id, TimestampsToReturn::Both, items_to_create.clone()).await {
+                    Ok(_) => {}
+                    Err(e) => {
+                        // If subscription ID is invalid (e.g. after reconnect), recreate it
+                        let err_str = format!("{}", e);
+                        if err_str.contains("BadSubscriptionIdInvalid") {
+                            info!("Subscription {} invalid, recreating...", sub_id);
+                            self.reset_subscription_id().await;
+                            let new_sub_id = self.ensure_subscription(session).await?;
+                            session
+                                .create_monitored_items(new_sub_id, TimestampsToReturn::Both, items_to_create)
+                                .await
+                                .map_err(|e2| OpcUaSimError::SubscriptionError(format!("Retry create monitored items failed: {}", e2)))?;
+                        } else {
+                            return Err(OpcUaSimError::SubscriptionError(format!("Create monitored items failed: {}", e)));
+                        }
+                    }
+                }
             }
 
             // Do an initial read to populate values immediately (don't wait for data change)
@@ -194,6 +208,12 @@ impl SubscriptionManager {
             }
         }
         info!("Initial read completed for {} nodes", nodes.len());
+    }
+
+    /// Reset the subscription ID (e.g. after reconnect)
+    async fn reset_subscription_id(&self) {
+        let mut sid = self.subscription_id.write().await;
+        *sid = None;
     }
 
     pub async fn remove_nodes(&self, node_ids: &[String]) -> Result<(), OpcUaSimError> {
