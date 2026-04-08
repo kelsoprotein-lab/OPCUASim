@@ -89,7 +89,7 @@ pub async fn read_node_attributes(
         .await
         .map_err(|e| OpcUaSimError::ReadError(format!("Read failed: {}", e)))?;
 
-    let display_name = values.get(0)
+    let display_name = values.first()
         .and_then(|dv| dv.value.as_ref())
         .map(|v| format!("{}", v))
         .unwrap_or_else(|| node_id.to_string());
