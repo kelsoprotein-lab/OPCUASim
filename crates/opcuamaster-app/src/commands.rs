@@ -127,9 +127,53 @@ pub async fn connect(
             *state_arc.write().await = ConnectionState::Connected;
 
             let _ = app.emit("connection-state-changed", ConnectionStateEvent {
-                id: conn_id,
+                id: conn_id.clone(),
                 state: "Connected".to_string(),
             });
+
+            // Spawn event-loop monitor task to detect server-initiated disconnects
+            let monitor_state_arc = state_arc.clone();
+            let monitor_handle_holder = {
+                let connections = state.connections.read().map_err(|e| e.to_string())?;
+                let entry = connections.get(&id).ok_or("Connection not found")?;
+                entry.connection.get_event_loop_handle_holder()
+            };
+            let monitor_app = app.clone();
+            let monitor_conn_id = conn_id.clone();
+
+            tokio::spawn(async move {
+                loop {
+                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+
+                    let current_state = monitor_state_arc.read().await.clone();
+                    if current_state != ConnectionState::Connected {
+                        break;
+                    }
+
+                    let handle_guard = monitor_handle_holder.read().await;
+                    match handle_guard.as_ref() {
+                        None => break,
+                        Some(handle) if handle.is_finished() => {
+                            drop(handle_guard);
+                            *monitor_state_arc.write().await = ConnectionState::Disconnected;
+                            let _ = monitor_app.emit(
+                                "connection-state-changed",
+                                ConnectionStateEvent {
+                                    id: monitor_conn_id.clone(),
+                                    state: "Disconnected".to_string(),
+                                },
+                            );
+                            log::info!(
+                                "Event loop finished for {}: server disconnected",
+                                monitor_conn_id
+                            );
+                            break;
+                        }
+                        _ => {}
+                    }
+                }
+            });
+
             Ok(())
         }
         Err(e) => {
@@ -376,6 +420,21 @@ pub async fn read_node_attributes(
         quality: attrs.quality,
         timestamp: attrs.timestamp,
     })
+}
+
+#[tauri::command]
+pub async fn write_node_value(
+    state: State<'_, AppState>,
+    conn_id: String,
+    node_id: String,
+    value: String,
+    data_type: String,
+) -> Result<(), String> {
+    let session = get_session_from_state(&state, &conn_id).await?;
+
+    opcuasim_core::browse::write_node_value(&session, &node_id, &value, &data_type)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 // ── Monitor Commands ──────────────────────────────────────────

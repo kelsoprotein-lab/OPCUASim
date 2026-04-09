@@ -3,8 +3,9 @@ use std::sync::Arc;
 use opcua_client::Session;
 use log::info;
 use opcua_types::{
-    AttributeId, BrowseDescription, BrowseDirection, NodeClass, NodeId,
-    ReadValueId, ReferenceTypeId, TimestampsToReturn,
+    AttributeId, BrowseDescription, BrowseDirection, DataValue, NodeClass, NodeId,
+    NumericRange, ReadValueId, ReferenceTypeId, StatusCode, TimestampsToReturn,
+    UAString, Variant, WriteValue,
 };
 
 use crate::error::OpcUaSimError;
@@ -171,4 +172,63 @@ pub async fn read_node_attributes(
         quality,
         timestamp,
     })
+}
+
+/// Convert a user-entered string to the appropriate OPC UA Variant based on the data type name.
+fn string_to_variant(value: &str, data_type: &str) -> Result<Variant, OpcUaSimError> {
+    let err = |msg: &dyn std::fmt::Display| {
+        OpcUaSimError::WriteError(format!("Cannot convert '{}' to {}: {}", value, data_type, msg))
+    };
+    match data_type {
+        "Boolean" => match value.eq_ignore_ascii_case("true") || value == "1" {
+            true => Ok(Variant::Boolean(true)),
+            false if value.eq_ignore_ascii_case("false") || value == "0" => Ok(Variant::Boolean(false)),
+            _ => Err(err(&"expected true/false/1/0")),
+        },
+        "SByte" => value.parse::<i8>().map(Variant::SByte).map_err(|e| err(&e)),
+        "Byte" => value.parse::<u8>().map(Variant::Byte).map_err(|e| err(&e)),
+        "Int16" => value.parse::<i16>().map(Variant::Int16).map_err(|e| err(&e)),
+        "UInt16" => value.parse::<u16>().map(Variant::UInt16).map_err(|e| err(&e)),
+        "Int32" => value.parse::<i32>().map(Variant::Int32).map_err(|e| err(&e)),
+        "UInt32" => value.parse::<u32>().map(Variant::UInt32).map_err(|e| err(&e)),
+        "Int64" => value.parse::<i64>().map(Variant::Int64).map_err(|e| err(&e)),
+        "UInt64" => value.parse::<u64>().map(Variant::UInt64).map_err(|e| err(&e)),
+        "Float" => value.parse::<f32>().map(Variant::Float).map_err(|e| err(&e)),
+        "Double" => value.parse::<f64>().map(Variant::Double).map_err(|e| err(&e)),
+        "String" => Ok(Variant::String(UAString::from(value))),
+        _ => Err(OpcUaSimError::WriteError(format!("Unsupported data type for write: {}", data_type))),
+    }
+}
+
+/// Write a value to a node's Value attribute.
+pub async fn write_node_value(
+    session: &Arc<Session>,
+    node_id: &str,
+    value: &str,
+    data_type: &str,
+) -> Result<(), OpcUaSimError> {
+    let target_node = node_id.parse::<NodeId>()
+        .map_err(|e| OpcUaSimError::WriteError(format!("Invalid node id '{}': {}", node_id, e)))?;
+
+    let variant = string_to_variant(value, data_type)?;
+
+    let write_value = WriteValue {
+        node_id: target_node,
+        attribute_id: AttributeId::Value as u32,
+        index_range: NumericRange::None,
+        value: DataValue::value_only(variant),
+    };
+
+    let results = session
+        .write(&[write_value])
+        .await
+        .map_err(|e| OpcUaSimError::WriteError(format!("Write request failed: {}", e)))?;
+
+    let status = results.first().copied().unwrap_or(StatusCode::BadUnexpectedError);
+    if !status.is_good() {
+        return Err(OpcUaSimError::WriteError(format!("Write failed: {}", status)));
+    }
+
+    info!("Write succeeded: {} = {} ({})", node_id, value, data_type);
+    Ok(())
 }

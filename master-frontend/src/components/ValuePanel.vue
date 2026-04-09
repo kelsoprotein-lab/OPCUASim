@@ -30,8 +30,13 @@ async function readNode() {
 async function writeNode() {
   if (!node.value || !selectedConnectionId.value || !writeValue.value) return
   try {
-    // write_value command will be added in Task 8
-    await dialog.showAlert('Info', 'Write not yet implemented (pending async-opcua integration)')
+    await invoke('write_node_value', {
+      connId: selectedConnectionId.value,
+      nodeId: node.value.node_id,
+      value: writeValue.value,
+      dataType: node.value.data_type,
+    })
+    writeValue.value = ''
   } catch (e) {
     await dialog.showAlert('Write Error', String(e))
   }

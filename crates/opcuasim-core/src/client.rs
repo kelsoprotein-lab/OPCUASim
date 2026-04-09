@@ -281,6 +281,13 @@ impl OpcUaConnection {
         self.session.clone()
     }
 
+    /// Get a clone of the event_loop_handle Arc, for external monitoring.
+    /// The caller can use `JoinHandle::is_finished()` to detect when the
+    /// OPC UA event loop has stopped (e.g. server dropped the connection).
+    pub fn get_event_loop_handle_holder(&self) -> Arc<RwLock<Option<JoinHandle<opcua_types::StatusCode>>>> {
+        self.event_loop_handle.clone()
+    }
+
     pub async fn start_reconnect_loop<F>(&self, on_state_change: F)
     where
         F: Fn(ConnectionState) + Send + Sync + 'static,

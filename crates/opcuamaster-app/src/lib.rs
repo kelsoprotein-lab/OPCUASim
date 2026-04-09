@@ -19,6 +19,7 @@ pub fn run() {
             commands::browse_root,
             commands::browse_node,
             commands::read_node_attributes,
+            commands::write_node_value,
             // Monitor commands
             commands::add_monitored_nodes,
             commands::add_variables_under_node,
