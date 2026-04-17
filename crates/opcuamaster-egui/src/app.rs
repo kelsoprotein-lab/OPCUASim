@@ -10,6 +10,7 @@ pub struct MasterApp {
     backend: BackendHandle,
     event_rx: UnboundedReceiver<BackendEvent>,
     model: AppModel,
+    last_size: (f32, f32),
 }
 
 impl MasterApp {
@@ -22,6 +23,60 @@ impl MasterApp {
             backend,
             event_rx,
             model: AppModel::default(),
+            last_size: (0.0, 0.0),
+        }
+    }
+
+    fn handle_shortcuts(&mut self, ctx: &egui::Context) {
+        if self.model.modal.is_some() {
+            return;
+        }
+        let (cmd_n, cmd_s, cmd_o, del) = ctx.input(|i| {
+            (
+                i.modifiers.command && i.key_pressed(egui::Key::N),
+                i.modifiers.command && i.key_pressed(egui::Key::S),
+                i.modifiers.command && i.key_pressed(egui::Key::O),
+                i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace),
+            )
+        });
+        if cmd_n {
+            self.model.modal = Some(Modal::NewConnection(
+                crate::widgets::connection_dialog::ConnDialogState::default(),
+            ));
+        }
+        if cmd_s {
+            if let Some(path) = rfd::FileDialog::new()
+                .set_file_name("project.opcuaproj")
+                .add_filter("OPCUA Project", &["opcuaproj", "json"])
+                .save_file()
+            {
+                self.backend.send(UiCommand::SaveProject(path));
+            }
+        }
+        if cmd_o {
+            if let Some(path) = rfd::FileDialog::new()
+                .add_filter("OPCUA Project", &["opcuaproj", "json"])
+                .pick_file()
+            {
+                self.backend.send(UiCommand::LoadProject(path));
+            }
+        }
+        if del && !self.model.monitor.selected_rows.is_empty() {
+            if let Some(conn_id) = self.model.selected_conn.clone() {
+                let ids: Vec<String> =
+                    self.model.monitor.selected_rows.iter().cloned().collect();
+                self.backend.send(UiCommand::RemoveMonitoredNodes {
+                    conn_id: conn_id.clone(),
+                    node_ids: ids.clone(),
+                });
+                if let Some(per) = self.model.monitor.per_conn.get_mut(&conn_id) {
+                    for id in &ids {
+                        per.rows.shift_remove(id);
+                    }
+                }
+                self.model.monitor.selected_rows.clear();
+                self.model.monitor.filter_dirty = true;
+            }
         }
     }
 
@@ -116,6 +171,9 @@ impl MasterApp {
     }
 
     fn render_toasts(&mut self, ctx: &egui::Context) {
+        if self.model.toasts.is_empty() {
+            return;
+        }
         let now = std::time::Instant::now();
         self.model
             .toasts
@@ -123,6 +181,7 @@ impl MasterApp {
         if self.model.toasts.is_empty() {
             return;
         }
+        ctx.request_repaint_after(std::time::Duration::from_millis(500));
         egui::Area::new("toasts".into())
             .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-16.0, -16.0))
             .show(ctx, |ui| {
@@ -149,6 +208,12 @@ impl eframe::App for MasterApp {
         self.drain_events();
 
         let ctx = ui.ctx().clone();
+        self.handle_shortcuts(&ctx);
+
+        if let Some(rect) = ctx.input(|i| i.viewport().inner_rect) {
+            self.last_size = (rect.width(), rect.height());
+        }
+
         ui.add_enabled_ui(self.model.modal.is_none(), |ui| {
             egui::Panel::top("toolbar").show_inside(ui, |ui| {
                 toolbar::show(ui, &mut self.model, &self.backend);
@@ -186,5 +251,17 @@ impl eframe::App for MasterApp {
         browse_panel::show(&ctx, &mut self.model, &self.backend);
         self.render_modal(&ctx);
         self.render_toasts(&ctx);
+    }
+
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        if self.last_size.0 > 0.0 && self.last_size.1 > 0.0 {
+            crate::settings::save(
+                crate::APP_ID,
+                &crate::settings::WindowSettings {
+                    width: self.last_size.0,
+                    height: self.last_size.1,
+                },
+            );
+        }
     }
 }

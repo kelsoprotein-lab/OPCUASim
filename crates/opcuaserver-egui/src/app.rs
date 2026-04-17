@@ -9,6 +9,7 @@ pub struct ServerApp {
     backend: BackendHandle,
     event_rx: UnboundedReceiver<BackendEvent>,
     model: AppModel,
+    last_size: (f32, f32),
 }
 
 impl ServerApp {
@@ -21,6 +22,33 @@ impl ServerApp {
             backend,
             event_rx,
             model: AppModel::default(),
+            last_size: (0.0, 0.0),
+        }
+    }
+
+    fn handle_shortcuts(&mut self, ctx: &egui::Context) {
+        let (cmd_s, cmd_o) = ctx.input(|i| {
+            (
+                i.modifiers.command && i.key_pressed(egui::Key::S),
+                i.modifiers.command && i.key_pressed(egui::Key::O),
+            )
+        });
+        if cmd_s {
+            if let Some(path) = rfd::FileDialog::new()
+                .set_file_name("server.opcuaproj")
+                .add_filter("OPCUA Server Project", &["opcuaproj", "json"])
+                .save_file()
+            {
+                self.backend.send(UiCommand::SaveProject(path));
+            }
+        }
+        if cmd_o {
+            if let Some(path) = rfd::FileDialog::new()
+                .add_filter("OPCUA Server Project", &["opcuaproj", "json"])
+                .pick_file()
+            {
+                self.backend.send(UiCommand::LoadProject(path));
+            }
         }
     }
 
@@ -50,6 +78,9 @@ impl ServerApp {
     }
 
     fn render_toasts(&mut self, ctx: &egui::Context) {
+        if self.model.toasts.is_empty() {
+            return;
+        }
         let now = std::time::Instant::now();
         self.model
             .toasts
@@ -57,6 +88,7 @@ impl ServerApp {
         if self.model.toasts.is_empty() {
             return;
         }
+        ctx.request_repaint_after(std::time::Duration::from_millis(500));
         egui::Area::new("toasts".into())
             .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-16.0, -40.0))
             .show(ctx, |ui| {
@@ -78,6 +110,11 @@ impl ServerApp {
 impl eframe::App for ServerApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.drain_events();
+        let ctx = ui.ctx().clone();
+        self.handle_shortcuts(&ctx);
+        if let Some(rect) = ctx.input(|i| i.viewport().inner_rect) {
+            self.last_size = (rect.width(), rect.height());
+        }
 
         egui::Panel::top("toolbar")
             .default_size(72.0)
@@ -113,5 +150,17 @@ impl eframe::App for ServerApp {
         });
 
         self.render_toasts(ui.ctx());
+    }
+
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        if self.last_size.0 > 0.0 && self.last_size.1 > 0.0 {
+            crate::settings::save(
+                crate::APP_ID,
+                &crate::settings::WindowSettings {
+                    width: self.last_size.0,
+                    height: self.last_size.1,
+                },
+            );
+        }
     }
 }
