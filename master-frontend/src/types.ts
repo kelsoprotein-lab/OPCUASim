@@ -29,6 +29,7 @@ export interface MonitoredNodeInfo {
   access_mode: string
   interval_ms: number
   group_id?: string
+  user_access_level: number
 }
 
 export interface NodeGroupInfo {

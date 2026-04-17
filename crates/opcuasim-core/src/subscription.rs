@@ -99,6 +99,13 @@ impl SubscriptionManager {
             let value_str = data_value.value.as_ref()
                 .map(|v| format!("{}", v))
                 .unwrap_or_else(|| "null".to_string());
+            let data_type_str = data_value.value.as_ref().map(|v| {
+                match v.type_id() {
+                    opcua_types::variant::VariantTypeId::Empty => "Empty".to_string(),
+                    opcua_types::variant::VariantTypeId::Scalar(s) => format!("{}", s),
+                    opcua_types::variant::VariantTypeId::Array(s, _) => format!("Array<{}>", s),
+                }
+            });
             let quality_str = data_value.status
                 .as_ref()
                 .map(|s| format!("{}", s))
@@ -123,6 +130,9 @@ impl SubscriptionManager {
                     node.quality = Some(quality_str);
                     node.timestamp = Some(source_ts);
                     node.server_timestamp = Some(server_ts);
+                    if let Some(dt) = data_type_str {
+                        node.data_type = dt;
+                    }
                     node.update_seq = *seq_val;
                 }
             });
@@ -154,7 +164,8 @@ impl SubscriptionManager {
     async fn initial_read(&self, session: &Arc<Session>, nodes: &[MonitoredNode]) {
         const BATCH_SIZE: usize = 200;
 
-        // Build all ReadValueIds upfront: 2 attributes per node (Value + NodeClass)
+        // Build all ReadValueIds upfront: 4 attributes per node
+        const ATTRS_PER_NODE: usize = 4;
         let mut valid_nodes: Vec<(usize, NodeId)> = Vec::new();
         for (i, node) in nodes.iter().enumerate() {
             if let Ok(nid) = node.node_id.parse::<NodeId>() {
@@ -166,19 +177,22 @@ impl SubscriptionManager {
         let mut seq = self.update_seq.write().await;
 
         for batch in valid_nodes.chunks(BATCH_SIZE) {
-            // Build batch read request: [DataType0, Value0, DataType1, Value1, ...]
             let read_ids: Vec<ReadValueId> = batch.iter().flat_map(|(_, nid)| {
                 vec![
                     ReadValueId::new(nid.clone(), opcua_types::AttributeId::DataType),
                     ReadValueId::new(nid.clone(), opcua_types::AttributeId::Value),
+                    ReadValueId::new(nid.clone(), opcua_types::AttributeId::AccessLevel),
+                    ReadValueId::new(nid.clone(), opcua_types::AttributeId::UserAccessLevel),
                 ]
             }).collect();
 
             match session.read(&read_ids, TimestampsToReturn::Both, 0.0).await {
                 Ok(values) => {
                     for (batch_idx, (node_idx, _)) in batch.iter().enumerate() {
-                        let dt_dv = values.get(batch_idx * 2);
-                        let val_dv = values.get(batch_idx * 2 + 1);
+                        let dt_dv = values.get(batch_idx * ATTRS_PER_NODE);
+                        let val_dv = values.get(batch_idx * ATTRS_PER_NODE + 1);
+                        let al_dv = values.get(batch_idx * ATTRS_PER_NODE + 2);
+                        let ual_dv = values.get(batch_idx * ATTRS_PER_NODE + 3);
 
                         let data_type = dt_dv
                             .and_then(|dv| dv.value.as_ref())
@@ -191,11 +205,29 @@ impl SubscriptionManager {
                         let server_ts = val_dv.and_then(|dv| dv.server_timestamp.as_ref()).map(|t| t.to_string());
                         let is_value_ok = quality.as_deref() != Some("BadAttributeIdInvalid");
 
+                        // Extract access level byte from Variant, handling multiple numeric types
+                        let extract_byte = |dv: Option<&opcua_types::DataValue>| -> Option<u8> {
+                            let v = dv?.value.as_ref()?;
+                            match v {
+                                opcua_types::Variant::Byte(b) => Some(*b),
+                                opcua_types::Variant::UInt16(u) => Some(*u as u8),
+                                opcua_types::Variant::Int16(i) => Some(*i as u8),
+                                opcua_types::Variant::UInt32(u) => Some(*u as u8),
+                                opcua_types::Variant::Int32(i) => Some(*i as u8),
+                                _ => None,
+                            }
+                        };
+                        // Prefer UserAccessLevel; fall back to AccessLevel if unavailable
+                        let user_access_level = extract_byte(ual_dv)
+                            .or_else(|| extract_byte(al_dv))
+                            .unwrap_or(0);
+
                         if let Some(n) = items.get_mut(&nodes[*node_idx].node_id) {
                             *seq += 1;
                             n.data_type = data_type;
                             n.timestamp = source_ts;
                             n.server_timestamp = server_ts;
+                            n.user_access_level = user_access_level;
                             if is_value_ok {
                                 n.value = value;
                                 n.quality = Some(quality.unwrap_or_else(|| "Good".to_string()));

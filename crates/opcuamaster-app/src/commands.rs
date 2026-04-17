@@ -361,6 +361,7 @@ pub async fn add_variables_under_node(
             access_mode: mode.clone(),
             group_id: None,
             update_seq: 0,
+            user_access_level: 0,
         }
     }).collect();
 
@@ -482,6 +483,7 @@ pub async fn add_monitored_nodes(
             access_mode,
             group_id: n.group_id,
             update_seq: 0,
+            user_access_level: 0,
         }
     }).collect();
 
@@ -558,6 +560,7 @@ pub async fn get_monitored_data(
             access_mode: access_mode_str,
             interval_ms,
             group_id: n.group_id,
+            user_access_level: n.user_access_level,
         }
     }).collect();
 

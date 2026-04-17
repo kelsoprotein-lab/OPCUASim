@@ -2,6 +2,7 @@
   "private": true,
   "workspaces": [
     "shared-frontend",
-    "master-frontend"
+    "master-frontend",
+    "server-frontend"
   ]
 }

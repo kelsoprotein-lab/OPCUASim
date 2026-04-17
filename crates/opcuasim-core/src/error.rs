@@ -31,6 +31,12 @@ pub enum OpcUaSimError {
     #[error("Output error: {0}")]
     OutputError(String),
 
+    // Server layer
+    #[error("Server error: {0}")]
+    ServerError(String),
+    #[error("Simulation error: {0}")]
+    SimulationError(String),
+
     // Generic
     #[error("IO error: {0}")]
     Io(String),
@@ -47,6 +53,7 @@ impl OpcUaSimError {
             | Self::WriteError(_) | Self::SubscriptionError(_) => "protocol",
             Self::ConfigError(_) | Self::ProjectFileError(_)
             | Self::OutputError(_) => "application",
+            Self::ServerError(_) | Self::SimulationError(_) => "server",
             Self::Io(_) | Self::Internal(_) => "generic",
         }
     }

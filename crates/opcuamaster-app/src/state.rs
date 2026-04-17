@@ -63,6 +63,7 @@ pub struct MonitoredNodeDto {
     pub access_mode: String,
     pub interval_ms: f64,
     pub group_id: Option<String>,
+    pub user_access_level: u8,
 }
 
 #[derive(Serialize)]

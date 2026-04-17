@@ -1,3 +1,3 @@
 [workspace]
-members = ["crates/opcuasim-core", "crates/opcuamaster-app"]
+members = ["crates/opcuasim-core", "crates/opcuamaster-app", "crates/opcuaserver-app"]
 resolver = "2"

@@ -25,6 +25,8 @@ pub struct MonitoredNode {
     pub access_mode: AccessMode,
     pub group_id: Option<String>,
     pub update_seq: u64,
+    /// OPC UA UserAccessLevel bitmask (bit 0=Read, bit 1=Write). 0 = unknown.
+    pub user_access_level: u8,
 }
 
 impl MonitoredNode {
@@ -41,6 +43,7 @@ impl MonitoredNode {
             access_mode: AccessMode::default(),
             group_id: None,
             update_seq: 0,
+            user_access_level: 0,
         }
     }
 }

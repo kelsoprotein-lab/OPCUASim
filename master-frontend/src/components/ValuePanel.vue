@@ -10,6 +10,7 @@ const dialog = inject(dialogKey)!
 
 const node = computed(() => selectedNodes.value.length === 1 ? selectedNodes.value[0] : null)
 const multiCount = computed(() => selectedNodes.value.length)
+const isWritable = computed(() => node.value ? (node.value.user_access_level & 0x02) !== 0 : false)
 
 const writeValue = ref('')
 
@@ -71,6 +72,10 @@ function qualityColor(quality?: string): string {
           <span class="field-label">Access Mode</span>
           <span class="field-value">{{ node.access_mode }} ({{ node.interval_ms }}ms)</span>
         </div>
+        <div class="field">
+          <span class="field-label">Access Level</span>
+          <span class="field-value">{{ node.user_access_level }} ({{ (node.user_access_level & 0x01) ? 'R' : '' }}{{ (node.user_access_level & 0x02) ? 'W' : '' }}{{ node.user_access_level === 0 ? 'unknown' : '' }})</span>
+        </div>
       </div>
 
       <div class="section">
@@ -99,6 +104,7 @@ function qualityColor(quality?: string): string {
           />
           <button class="action-btn" @click="writeNode" :disabled="!writeValue">Write</button>
         </div>
+        <div v-if="!isWritable" class="hint">Node reports read-only (level={{ node.user_access_level }})</div>
       </div>
     </template>
 
@@ -224,6 +230,12 @@ function qualityColor(quality?: string): string {
 .write-group .action-btn {
   width: auto;
   margin-bottom: 0;
+}
+
+.hint {
+  font-size: 11px;
+  color: #f9e2af;
+  margin-top: 2px;
 }
 
 .no-selection, .multi-select {
