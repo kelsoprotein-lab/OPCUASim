@@ -1,0 +1,28 @@
+[package]
+name = "opcuamaster-egui"
+version = "0.2.0"
+description = "OPCUAMaster (egui) - Cross-platform OPC UA Master Station"
+edition = "2021"
+rust-version = "1.77.2"
+
+[[bin]]
+name = "OPCUAMaster"
+path = "src/main.rs"
+
+[dependencies]
+opcuasim-core = { path = "../opcuasim-core" }
+eframe.workspace = true
+egui.workspace = true
+egui_extras.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+rfd.workspace = true
+csv.workspace = true
+anyhow.workspace = true
+log.workspace = true
+env_logger.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+indexmap.workspace = true
