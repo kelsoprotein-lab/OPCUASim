@@ -57,7 +57,6 @@ pub enum UiCommand {
     ListGroups,
     SaveProject(std::path::PathBuf),
     LoadProject(std::path::PathBuf),
-    Shutdown,
 }
 
 #[derive(Debug, Clone)]

@@ -3,16 +3,15 @@
 mod app;
 mod backend;
 mod events;
-mod fonts;
 mod model;
 mod panels;
 mod runtime;
-mod settings;
 mod widgets;
 
 use app::MasterApp;
+use opcuaegui_shared::settings;
 
-const APP_ID: &str = "opcuamaster";
+pub const APP_ID: &str = "opcuamaster";
 
 fn main() -> eframe::Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();

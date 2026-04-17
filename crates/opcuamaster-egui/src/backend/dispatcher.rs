@@ -54,10 +54,6 @@ pub async fn run(
                     log::info!("cmd channel closed");
                     break;
                 };
-                if matches!(cmd, UiCommand::Shutdown) {
-                    log::info!("shutdown requested");
-                    break;
-                }
                 tokio::spawn(handle_cmd(
                     cmd,
                     state.clone(),
@@ -194,7 +190,6 @@ async fn handle_cmd(
         UiCommand::ListGroups => list_groups(&state, &event_tx),
         UiCommand::SaveProject(path) => save_project(path, &state, &event_tx).await,
         UiCommand::LoadProject(path) => load_project(path, &state, &event_tx).await,
-        UiCommand::Shutdown => Ok(()),
     };
 
     if let Err(e) = result {

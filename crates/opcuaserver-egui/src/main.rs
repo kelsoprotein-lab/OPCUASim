@@ -3,13 +3,12 @@
 mod app;
 mod backend;
 mod events;
-mod fonts;
 mod model;
 mod panels;
 mod runtime;
-mod settings;
 
 use app::ServerApp;
+use opcuaegui_shared::settings;
 
 pub const APP_ID: &str = "opcuaserver";
 

@@ -42,7 +42,6 @@ pub async fn run(
             _ = cancel.cancelled() => break,
             maybe = cmd_rx.recv() => {
                 let Some(cmd) = maybe else { break };
-                if matches!(cmd, UiCommand::Shutdown) { break; }
                 let s = state.clone();
                 let tx = event_tx.clone();
                 let ctx = egui_ctx.clone();
@@ -214,7 +213,6 @@ async fn handle_cmd(
                 message: format!("项目已加载 ({})", path.display()),
             });
         }
-        UiCommand::Shutdown => {}
     }
     Ok(())
 }

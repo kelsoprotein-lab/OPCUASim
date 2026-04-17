@@ -23,7 +23,6 @@ pub enum UiCommand {
     },
     LoadProject(std::path::PathBuf),
     SaveProject(std::path::PathBuf),
-    Shutdown,
 }
 
 #[derive(Debug, Clone)]

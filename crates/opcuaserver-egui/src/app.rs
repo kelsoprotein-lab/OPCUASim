@@ -14,8 +14,12 @@ pub struct ServerApp {
 
 impl ServerApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        crate::fonts::install_cjk_fonts(&cc.egui_ctx);
-        let (backend, event_rx) = BackendHandle::new(cc.egui_ctx.clone());
+        opcuaegui_shared::fonts::install_cjk_fonts(&cc.egui_ctx);
+        let (backend, event_rx) = BackendHandle::new(
+            cc.egui_ctx.clone(),
+            "opcua-server-backend",
+            crate::backend::dispatcher::run,
+        );
         backend.send(UiCommand::RefreshAddressSpace);
         backend.send(UiCommand::RefreshStatus);
         Self {
@@ -154,9 +158,9 @@ impl eframe::App for ServerApp {
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
         if self.last_size.0 > 0.0 && self.last_size.1 > 0.0 {
-            crate::settings::save(
+            opcuaegui_shared::settings::save(
                 crate::APP_ID,
-                &crate::settings::WindowSettings {
+                &opcuaegui_shared::settings::WindowSettings {
                     width: self.last_size.0,
                     height: self.last_size.1,
                 },
