@@ -9,6 +9,7 @@ pub mod client;
 pub mod browse;
 pub mod subscription;
 pub mod polling;
+pub mod server;     // OPC UA server simulation module
 
 /// Re-export the OPC UA Session type for downstream crates.
 pub use opcua_client::Session as OpcUaSession;

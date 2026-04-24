@@ -211,9 +211,10 @@ pub async fn write_node_value(
         .map_err(|e| OpcUaSimError::WriteError(format!("Invalid node id '{}': {}", node_id, e)))?;
 
     let variant = string_to_variant(value, data_type)?;
+    info!("Writing {} = {:?} (data_type={})", node_id, variant, data_type);
 
     let write_value = WriteValue {
-        node_id: target_node,
+        node_id: target_node.clone(),
         attribute_id: AttributeId::Value as u32,
         index_range: NumericRange::None,
         value: DataValue::value_only(variant),
@@ -226,7 +227,27 @@ pub async fn write_node_value(
 
     let status = results.first().copied().unwrap_or(StatusCode::BadUnexpectedError);
     if !status.is_good() {
-        return Err(OpcUaSimError::WriteError(format!("Write failed: {}", status)));
+        // Read AccessLevel + UserAccessLevel for diagnostics
+        let diag_reads = vec![
+            ReadValueId::new(target_node.clone(), AttributeId::AccessLevel),
+            ReadValueId::new(target_node, AttributeId::UserAccessLevel),
+        ];
+        let diag = session.read(&diag_reads, TimestampsToReturn::Neither, 0.0).await.ok();
+        let (al, ual) = diag.map(|v| {
+            let fmt = |dv: Option<&opcua_types::DataValue>| -> String {
+                dv.and_then(|d| d.value.as_ref())
+                    .map(|v| format!("{v}"))
+                    .unwrap_or_else(|| {
+                        dv.and_then(|d| d.status.as_ref())
+                            .map(|s| format!("{s}"))
+                            .unwrap_or("?".into())
+                    })
+            };
+            (fmt(v.first()), fmt(v.get(1)))
+        }).unwrap_or(("?".into(), "?".into()));
+        return Err(OpcUaSimError::WriteError(
+            format!("{} (AccessLevel={}, UserAccessLevel={})", status, al, ual)
+        ));
     }
 
     info!("Write succeeded: {} = {} ({})", node_id, value, data_type);

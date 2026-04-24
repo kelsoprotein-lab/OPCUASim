@@ -1,7 +1,0 @@
-{
-  "private": true,
-  "workspaces": [
-    "shared-frontend",
-    "master-frontend"
-  ]
-}
