@@ -1,8 +1,6 @@
 [workspace]
 members = [
     "crates/opcuasim-core",
-    "crates/opcuamaster-app",
-    "crates/opcuaserver-app",
     "crates/opcuaegui-shared",
     "crates/opcuamaster-egui",
     "crates/opcuaserver-egui",
