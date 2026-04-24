@@ -19,7 +19,8 @@ use super::models::{ServerConfig, ServerFolder, ServerNode, ServerState};
 use super::simulation::SimulationEngine;
 use crate::error::OpcUaSimError;
 
-const NAMESPACE_URI: &str = "urn:opcuasim:server";
+const APPLICATION_URI: &str = "urn:opcuasim:server";
+const NAMESPACE_URI: &str = "urn:opcuasim:server:nodes";
 
 /// The OPC UA simulation server.
 pub struct OpcUaServer {
@@ -49,7 +50,7 @@ fn build_server(
     let mut user_token_ids: Vec<String> = Vec::new();
     let mut builder = ServerBuilder::new()
         .application_name(&config.name)
-        .application_uri("urn:opcuasim:server")
+        .application_uri(APPLICATION_URI)
         .product_uri("urn:opcuasim")
         .create_sample_keypair(true)
         .pki_dir("./pki-server")
@@ -133,7 +134,15 @@ fn build_server(
 
     let ns_index = {
         let ns = sim_nm.namespaces();
-        ns.keys().find(|&&k| k > 1).copied().unwrap_or(2)
+        ns.iter()
+            .find(|(_, uri)| uri.as_str() == NAMESPACE_URI)
+            .map(|(k, _)| *k)
+            .ok_or_else(|| {
+                OpcUaSimError::ServerError(format!(
+                    "Custom namespace '{}' not registered; got: {:?}",
+                    NAMESPACE_URI, ns
+                ))
+            })?
     };
 
     // Populate address space (sync)
