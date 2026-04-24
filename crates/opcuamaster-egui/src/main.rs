@@ -1,17 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-mod app;
-mod backend;
-mod events;
-mod model;
-mod panels;
-mod runtime;
-mod widgets;
-
-use app::MasterApp;
 use opcuaegui_shared::settings;
-
-pub const APP_ID: &str = "opcuamaster";
+use opcuamaster_egui::{app::MasterApp, APP_ID};
 
 fn main() -> eframe::Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
