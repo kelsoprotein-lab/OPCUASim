@@ -7,6 +7,7 @@ pub mod log_collector;
 pub mod reconnect;
 pub mod client;
 pub mod browse;
+pub mod discovery;
 pub mod subscription;
 pub mod polling;
 pub mod server;     // OPC UA server simulation module
