@@ -9,6 +9,7 @@ pub mod client;
 pub mod browse;
 pub mod cert_manager;
 pub mod discovery;
+pub mod method;
 pub mod subscription;
 pub mod polling;
 pub mod server;     // OPC UA server simulation module
