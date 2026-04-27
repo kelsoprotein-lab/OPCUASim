@@ -112,6 +112,28 @@ async fn master_full_flow() {
     let (backend, mut rx) =
         BackendHandle::new(ctx, "e2e-master", opcuamaster_egui::backend::dispatcher::run);
 
+    let mut saw_log = false;
+
+    // --- 0. DiscoverEndpoints ---
+    backend.send(UiCommand::DiscoverEndpoints {
+        url: format!("opc.tcp://127.0.0.1:{TEST_PORT}"),
+        timeout_ms: 5000,
+        req_id: 99,
+    });
+    let disc_ev = recv_until(&mut rx, 8, &mut saw_log, |e| {
+        matches!(e, BackendEvent::EndpointsDiscovered { req_id: 99, .. })
+    })
+    .await;
+    let BackendEvent::EndpointsDiscovered { endpoints, .. } = disc_ev else {
+        unreachable!()
+    };
+    assert!(
+        endpoints
+            .iter()
+            .any(|e| e.security_policy == "None" && e.security_mode == "None"),
+        "expected a None/None endpoint, got {endpoints:?}"
+    );
+
     // --- 1. CreateConnection ---
     backend.send(UiCommand::CreateConnection(CreateConnectionReq {
         name: "e2e".into(),
@@ -121,8 +143,6 @@ async fn master_full_flow() {
         auth: AuthKindReq::Anonymous,
         timeout_ms: 5000,
     }));
-
-    let mut saw_log = false;
 
     let conn_id = loop {
         let ev = recv_until(&mut rx, 5, &mut saw_log, |e| matches!(e, BackendEvent::Connections(_))).await;
