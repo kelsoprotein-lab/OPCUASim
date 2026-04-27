@@ -1,17 +1,12 @@
 use serde::{Deserialize, Serialize};
 use crate::node::{AccessMode, NodeGroup};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub enum AuthConfig {
+    #[default]
     Anonymous,
     UserPassword { username: String, password: String },
     Certificate { cert_path: String, key_path: String },
-}
-
-impl Default for AuthConfig {
-    fn default() -> Self {
-        AuthConfig::Anonymous
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

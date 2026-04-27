@@ -253,7 +253,7 @@ impl SubscriptionManager {
                 }
             }
         }
-        info!("Initial read completed for {} nodes ({} batches)", nodes.len(), (valid_nodes.len() + BATCH_SIZE - 1) / BATCH_SIZE);
+        info!("Initial read completed for {} nodes ({} batches)", nodes.len(), valid_nodes.len().div_ceil(BATCH_SIZE));
     }
 
     /// Reset the subscription ID (e.g. after reconnect)

@@ -114,7 +114,7 @@ async fn handle_cmd(
                 opcuasim_core::server::address_space::populate_address_space(
                     &mut addr,
                     ns,
-                    &[folder.clone()],
+                    std::slice::from_ref(&folder),
                     &[],
                 );
             }
