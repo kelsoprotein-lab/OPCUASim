@@ -19,6 +19,8 @@ uuid = { version = "1", features = ["v4", "serde"] }
 log = "0.4"
 rand = "0.8"
 sha1_smol = "1"
+x509-parser = "0.16"
+pem = "3"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full", "test-util"] }
