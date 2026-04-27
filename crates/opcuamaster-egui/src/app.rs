@@ -159,6 +159,24 @@ impl MasterApp {
                     }
                 }
             }
+            BackendEvent::CertificateList { req_id, role, certs } => {
+                if let Some(Modal::CertManager(state)) = self.model.modal.as_mut() {
+                    match role {
+                        crate::events::CertRoleDto::Trusted => {
+                            if state.pending_trusted_req == Some(req_id) {
+                                state.trusted = certs;
+                                state.pending_trusted_req = None;
+                            }
+                        }
+                        crate::events::CertRoleDto::Rejected => {
+                            if state.pending_rejected_req == Some(req_id) {
+                                state.rejected = certs;
+                                state.pending_rejected_req = None;
+                            }
+                        }
+                    }
+                }
+            }
             BackendEvent::Toast { level, message } => {
                 self.model.push_toast(level, message);
             }
@@ -191,6 +209,37 @@ impl MasterApp {
                     }
                 }
                 if !close {
+                    self.model.modal = Some(modal);
+                }
+            }
+            Modal::CertManager(state) => {
+                let actions = crate::widgets::cert_manager_dialog::show(ctx, state);
+                let mut needs_refresh = actions.refresh;
+                if let Some((path, to_role)) = actions.move_to {
+                    self.backend
+                        .send(UiCommand::MoveCertificate { path, to_role });
+                    needs_refresh = true;
+                }
+                if let Some(path) = actions.delete {
+                    self.backend.send(UiCommand::DeleteCertificate { path });
+                    needs_refresh = true;
+                }
+                if needs_refresh {
+                    let trusted_req = self.model.alloc_req_id();
+                    let rejected_req = self.model.alloc_req_id();
+                    state.pending_trusted_req = Some(trusted_req);
+                    state.pending_rejected_req = Some(rejected_req);
+                    state.selected_path = None;
+                    self.backend.send(UiCommand::ListCertificates {
+                        role: crate::events::CertRoleDto::Trusted,
+                        req_id: trusted_req,
+                    });
+                    self.backend.send(UiCommand::ListCertificates {
+                        role: crate::events::CertRoleDto::Rejected,
+                        req_id: rejected_req,
+                    });
+                }
+                if !actions.close {
                     self.model.modal = Some(modal);
                 }
             }

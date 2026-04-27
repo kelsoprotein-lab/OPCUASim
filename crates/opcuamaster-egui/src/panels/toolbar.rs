@@ -87,5 +87,25 @@ pub fn show(ui: &mut egui::Ui, model: &mut AppModel, backend: &BackendHandle) {
                 backend.send(UiCommand::LoadProject(path));
             }
         }
+
+        ui.separator();
+
+        if ui.button("🔐 证书管理").clicked() {
+            let trusted_req = model.alloc_req_id();
+            let rejected_req = model.alloc_req_id();
+            model.modal = Some(Modal::CertManager(crate::model::CertManagerState {
+                pending_trusted_req: Some(trusted_req),
+                pending_rejected_req: Some(rejected_req),
+                ..Default::default()
+            }));
+            backend.send(UiCommand::ListCertificates {
+                role: crate::events::CertRoleDto::Trusted,
+                req_id: trusted_req,
+            });
+            backend.send(UiCommand::ListCertificates {
+                role: crate::events::CertRoleDto::Rejected,
+                req_id: rejected_req,
+            });
+        }
     });
 }

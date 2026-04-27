@@ -63,6 +63,17 @@ impl AppModel {
 
 pub enum Modal {
     NewConnection(ConnDialogState),
+    CertManager(CertManagerState),
+}
+
+#[derive(Default)]
+pub struct CertManagerState {
+    pub trusted: Vec<crate::events::CertSummaryDto>,
+    pub rejected: Vec<crate::events::CertSummaryDto>,
+    pub pending_trusted_req: Option<u64>,
+    pub pending_rejected_req: Option<u64>,
+    pub selected_path: Option<std::path::PathBuf>,
+    pub error: Option<String>,
 }
 
 pub struct BrowseState {

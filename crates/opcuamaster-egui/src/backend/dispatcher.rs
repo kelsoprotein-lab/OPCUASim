@@ -7,6 +7,9 @@ use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
+use opcuasim_core::cert_manager::{
+    self, delete_certificate, list_certificates, move_certificate, CertRole,
+};
 use opcuasim_core::client::{ConnectionState, OpcUaConnection};
 use opcuasim_core::discovery::discover_endpoints;
 use opcuasim_core::config::{AuthConfig, ConnectionConfig, ConnectionProjectEntry, ProjectFile};
@@ -16,9 +19,9 @@ use opcuasim_core::subscription::SubscriptionManager;
 
 use crate::backend::state::{BackendState, ConnectionEntry};
 use crate::events::{
-    AuthKindReq, BackendEvent, BrowseItem, ConnectionInfo, CreateConnectionReq,
-    DiscoveredEndpointDto, LogRow, MonitoredNodeReq, MonitoredRow, NodeAttrsDto, NodeGroupDto,
-    ToastLevel, UiCommand,
+    AuthKindReq, BackendEvent, BrowseItem, CertRoleDto, CertSummaryDto, ConnectionInfo,
+    CreateConnectionReq, DiscoveredEndpointDto, LogRow, MonitoredNodeReq, MonitoredRow,
+    NodeAttrsDto, NodeGroupDto, ToastLevel, UiCommand,
 };
 
 pub async fn run(
@@ -197,6 +200,13 @@ async fn handle_cmd(
         UiCommand::ListGroups => list_groups(&state, &event_tx),
         UiCommand::SaveProject(path) => save_project(path, &state, &event_tx).await,
         UiCommand::LoadProject(path) => load_project(path, &state, &event_tx).await,
+        UiCommand::ListCertificates { role, req_id } => {
+            do_list_certs(role, req_id, &event_tx).await
+        }
+        UiCommand::MoveCertificate { path, to_role } => {
+            do_move_cert(path, to_role, &event_tx).await
+        }
+        UiCommand::DeleteCertificate { path } => do_delete_cert(path, &event_tx).await,
     };
 
     if let Err(e) = result {
@@ -924,4 +934,80 @@ async fn do_discover_endpoints(
         }
         Err(e) => Err(format!("Discovery failed: {e}")),
     }
+}
+
+const PKI_DIR: &str = "./pki";
+
+fn role_to_core(r: CertRoleDto) -> CertRole {
+    match r {
+        CertRoleDto::Trusted => CertRole::Trusted,
+        CertRoleDto::Rejected => CertRole::Rejected,
+    }
+}
+
+fn role_to_dto(r: CertRole) -> CertRoleDto {
+    match r {
+        CertRole::Trusted => CertRoleDto::Trusted,
+        CertRole::Rejected => CertRoleDto::Rejected,
+    }
+}
+
+async fn do_list_certs(
+    role: CertRoleDto,
+    req_id: u64,
+    event_tx: &UnboundedSender<BackendEvent>,
+) -> Result<(), String> {
+    let core_role = role_to_core(role);
+    let pki = std::path::Path::new(PKI_DIR);
+    let list = list_certificates(pki, core_role).map_err(|e| e.to_string())?;
+    let certs: Vec<CertSummaryDto> = list
+        .into_iter()
+        .map(|c| CertSummaryDto {
+            path: c.path,
+            file_name: c.file_name,
+            role: role_to_dto(c.role),
+            thumbprint: c.thumbprint,
+            subject_cn: c.subject_cn,
+            issuer_cn: c.issuer_cn,
+            valid_from: c.valid_from,
+            valid_to: c.valid_to,
+        })
+        .collect();
+    let _ = event_tx.send(BackendEvent::CertificateList { req_id, role, certs });
+    Ok(())
+}
+
+async fn do_move_cert(
+    path: std::path::PathBuf,
+    to_role: CertRoleDto,
+    event_tx: &UnboundedSender<BackendEvent>,
+) -> Result<(), String> {
+    let pki = std::path::Path::new(PKI_DIR);
+    move_certificate(pki, &path, role_to_core(to_role)).map_err(|e| e.to_string())?;
+    let target_name = match to_role {
+        CertRoleDto::Trusted => "Trusted",
+        CertRoleDto::Rejected => "Rejected",
+    };
+    let _ = event_tx.send(BackendEvent::Toast {
+        level: ToastLevel::Info,
+        message: format!("证书已移动到 {target_name}"),
+    });
+    Ok(())
+}
+
+async fn do_delete_cert(
+    path: std::path::PathBuf,
+    event_tx: &UnboundedSender<BackendEvent>,
+) -> Result<(), String> {
+    delete_certificate(&path).map_err(|e| e.to_string())?;
+    let _ = event_tx.send(BackendEvent::Toast {
+        level: ToastLevel::Info,
+        message: "证书已删除".into(),
+    });
+    Ok(())
+}
+
+#[allow(dead_code)]
+fn _cert_manager_keep() -> &'static str {
+    cert_manager::CertRole::Trusted.dir_name()
 }

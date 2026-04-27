@@ -62,6 +62,17 @@ pub enum UiCommand {
     ListGroups,
     SaveProject(std::path::PathBuf),
     LoadProject(std::path::PathBuf),
+    ListCertificates {
+        role: CertRoleDto,
+        req_id: u64,
+    },
+    MoveCertificate {
+        path: std::path::PathBuf,
+        to_role: CertRoleDto,
+    },
+    DeleteCertificate {
+        path: std::path::PathBuf,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -128,6 +139,11 @@ pub enum BackendEvent {
         req_id: u64,
         endpoints: Vec<DiscoveredEndpointDto>,
     },
+    CertificateList {
+        req_id: u64,
+        role: CertRoleDto,
+        certs: Vec<CertSummaryDto>,
+    },
     Toast {
         level: ToastLevel,
         message: String,
@@ -142,6 +158,24 @@ pub struct DiscoveredEndpointDto {
     pub security_level: u8,
     pub server_cert_thumbprint: String,
     pub user_token_policy_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CertRoleDto {
+    Trusted,
+    Rejected,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CertSummaryDto {
+    pub path: std::path::PathBuf,
+    pub file_name: String,
+    pub role: CertRoleDto,
+    pub thumbprint: String,
+    pub subject_cn: String,
+    pub issuer_cn: String,
+    pub valid_from: String,
+    pub valid_to: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
