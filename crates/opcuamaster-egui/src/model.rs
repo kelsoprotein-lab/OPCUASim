@@ -87,6 +87,10 @@ pub struct BrowseState {
     pub access_mode: String,
     pub interval_ms: f64,
     pub max_depth: u32,
+    pub filter_enabled: bool,
+    pub trigger: crate::events::DataChangeTriggerKindReq,
+    pub deadband_kind: crate::events::DeadbandKindReq,
+    pub deadband_value: f64,
 }
 
 pub struct BrowseNodeState {
@@ -203,7 +207,24 @@ impl Default for BrowseState {
             access_mode: "Subscription".into(),
             interval_ms: 1000.0,
             max_depth: 1,
+            filter_enabled: false,
+            trigger: crate::events::DataChangeTriggerKindReq::StatusValue,
+            deadband_kind: crate::events::DeadbandKindReq::None,
+            deadband_value: 0.0,
         }
+    }
+}
+
+impl AppModel {
+    pub fn current_filter_req(&self) -> Option<crate::events::DataChangeFilterReq> {
+        if !self.browse.filter_enabled {
+            return None;
+        }
+        Some(crate::events::DataChangeFilterReq {
+            trigger: self.browse.trigger,
+            deadband_kind: self.browse.deadband_kind,
+            deadband_value: self.browse.deadband_value,
+        })
     }
 }
 

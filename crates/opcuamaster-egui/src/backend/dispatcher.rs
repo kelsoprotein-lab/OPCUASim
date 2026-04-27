@@ -13,15 +13,18 @@ use opcuasim_core::cert_manager::{
 use opcuasim_core::client::{ConnectionState, OpcUaConnection};
 use opcuasim_core::discovery::discover_endpoints;
 use opcuasim_core::config::{AuthConfig, ConnectionConfig, ConnectionProjectEntry, ProjectFile};
-use opcuasim_core::node::{AccessMode, MonitoredNode, NodeGroup};
+use opcuasim_core::node::{
+    AccessMode, DataChangeFilterCfg, DataChangeTriggerKind, DeadbandKind, MonitoredNode, NodeGroup,
+};
 use opcuasim_core::polling::PollingManager;
 use opcuasim_core::subscription::SubscriptionManager;
 
 use crate::backend::state::{BackendState, ConnectionEntry};
 use crate::events::{
     AuthKindReq, BackendEvent, BrowseItem, CertRoleDto, CertSummaryDto, ConnectionInfo,
-    CreateConnectionReq, DiscoveredEndpointDto, LogRow, MonitoredNodeReq, MonitoredRow,
-    NodeAttrsDto, NodeGroupDto, ToastLevel, UiCommand,
+    CreateConnectionReq, DataChangeFilterReq, DataChangeTriggerKindReq, DeadbandKindReq,
+    DiscoveredEndpointDto, LogRow, MonitoredNodeReq, MonitoredRow, NodeAttrsDto, NodeGroupDto,
+    ToastLevel, UiCommand,
 };
 
 pub async fn run(
@@ -163,6 +166,7 @@ async fn handle_cmd(
             access_mode,
             interval_ms,
             max_depth,
+            filter,
         } => {
             add_variables_under_node(
                 conn_id,
@@ -170,6 +174,7 @@ async fn handle_cmd(
                 access_mode,
                 interval_ms,
                 max_depth,
+                filter,
                 &state,
                 &event_tx,
             )
@@ -232,6 +237,24 @@ fn auth_from_req(auth: AuthKindReq) -> AuthConfig {
             cert_path,
             key_path,
         },
+    }
+}
+
+fn filter_req_to_core(req: &DataChangeFilterReq) -> DataChangeFilterCfg {
+    DataChangeFilterCfg {
+        trigger: match req.trigger {
+            DataChangeTriggerKindReq::Status => DataChangeTriggerKind::Status,
+            DataChangeTriggerKindReq::StatusValue => DataChangeTriggerKind::StatusValue,
+            DataChangeTriggerKindReq::StatusValueTimestamp => {
+                DataChangeTriggerKind::StatusValueTimestamp
+            }
+        },
+        deadband_kind: match req.deadband_kind {
+            DeadbandKindReq::None => DeadbandKind::None,
+            DeadbandKindReq::Absolute => DeadbandKind::Absolute,
+            DeadbandKindReq::Percent => DeadbandKind::Percent,
+        },
+        deadband_value: req.deadband_value,
     }
 }
 
@@ -485,6 +508,7 @@ async fn add_monitored_nodes(
                 group_id: None,
                 update_seq: 0,
                 user_access_level: 0,
+                filter: n.filter.as_ref().map(filter_req_to_core),
             }
         })
         .collect();
@@ -513,12 +537,14 @@ async fn add_monitored_nodes(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn add_variables_under_node(
     conn_id: String,
     node_id: String,
     access_mode: String,
     interval_ms: f64,
     max_depth: u32,
+    filter: Option<DataChangeFilterReq>,
     state: &Arc<BackendState>,
     event_tx: &UnboundedSender<BackendEvent>,
 ) -> Result<(), String> {
@@ -541,6 +567,7 @@ async fn add_variables_under_node(
         _ => AccessMode::Subscription { interval_ms },
     };
     let count = variables.len();
+    let core_filter = filter.as_ref().map(filter_req_to_core);
     let nodes: Vec<MonitoredNode> = variables
         .into_iter()
         .map(|v| MonitoredNode {
@@ -556,6 +583,7 @@ async fn add_variables_under_node(
             group_id: None,
             update_seq: 0,
             user_access_level: 0,
+            filter: core_filter,
         })
         .collect();
 

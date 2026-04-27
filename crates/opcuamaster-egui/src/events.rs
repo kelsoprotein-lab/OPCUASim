@@ -31,6 +31,7 @@ pub enum UiCommand {
         access_mode: String,
         interval_ms: f64,
         max_depth: u32,
+        filter: Option<DataChangeFilterReq>,
     },
     RemoveMonitoredNodes {
         conn_id: String,
@@ -99,6 +100,28 @@ pub struct MonitoredNodeReq {
     pub data_type: Option<String>,
     pub access_mode: String, // "Subscription" or "Polling"
     pub interval_ms: f64,
+    pub filter: Option<DataChangeFilterReq>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DataChangeTriggerKindReq {
+    Status,
+    StatusValue,
+    StatusValueTimestamp,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DeadbandKindReq {
+    None,
+    Absolute,
+    Percent,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct DataChangeFilterReq {
+    pub trigger: DataChangeTriggerKindReq,
+    pub deadband_kind: DeadbandKindReq,
+    pub deadband_value: f64,
 }
 
 #[derive(Debug, Clone)]

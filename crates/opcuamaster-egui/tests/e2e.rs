@@ -11,7 +11,8 @@ use opcuasim_core::server::models::{
 use opcuasim_core::server::server::OpcUaServer;
 
 use opcuamaster_egui::events::{
-    AuthKindReq, BackendEvent, CreateConnectionReq, MonitoredNodeReq, UiCommand,
+    AuthKindReq, BackendEvent, CreateConnectionReq, DataChangeFilterReq, DataChangeTriggerKindReq,
+    DeadbandKindReq, MonitoredNodeReq, UiCommand,
 };
 use opcuamaster_egui::runtime::BackendHandle;
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -193,6 +194,7 @@ async fn master_full_flow() {
                 data_type: Some("Double".into()),
                 access_mode: "Subscription".into(),
                 interval_ms: 250.0,
+                filter: None,
             },
             MonitoredNodeReq {
                 node_id: "ns=2;s=Demo.Setpoint".into(),
@@ -200,6 +202,7 @@ async fn master_full_flow() {
                 data_type: Some("Double".into()),
                 access_mode: "Subscription".into(),
                 interval_ms: 250.0,
+                filter: None,
             },
         ],
     });
@@ -256,6 +259,7 @@ async fn master_full_flow() {
             data_type: Some("Double".into()),
             access_mode: "Subscription".into(),
             interval_ms: 500.0,
+            filter: None,
         }],
     });
     backend.send(UiCommand::ReadAttrs {
@@ -294,6 +298,127 @@ async fn master_full_flow() {
     assert!(saw_log, "expected at least one CommLog batch during session");
 
     // --- 8. Clean shutdown (drop BackendHandle off the async context) ---
+    tokio::task::spawn_blocking(move || drop(backend))
+        .await
+        .expect("drop backend");
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    server.stop().await.expect("server stop");
+}
+
+const DEADBAND_PORT: u16 = 48411;
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn deadband_reduces_samples() {
+    let server = Arc::new(OpcUaServer::new());
+    let config = ServerConfig {
+        name: "DeadbandTestServer".into(),
+        endpoint_url: format!("opc.tcp://127.0.0.1:{DEADBAND_PORT}"),
+        port: DEADBAND_PORT,
+        security_policies: vec!["None".into()],
+        security_modes: vec!["None".into()],
+        users: Vec::new(),
+        anonymous_enabled: true,
+        max_sessions: 10,
+        max_subscriptions_per_session: 10,
+    };
+    let folders = vec![ServerFolder {
+        node_id: "Demo".into(),
+        display_name: "Demo".into(),
+        parent_id: "i=85".into(),
+    }];
+    let nodes = vec![ServerNode {
+        node_id: "Demo.Sine".into(),
+        display_name: "Sine".into(),
+        parent_id: "Demo".into(),
+        data_type: DataType::Double,
+        writable: false,
+        simulation: SimulationMode::Sine {
+            amplitude: 10.0,
+            offset: 0.0,
+            period_ms: 4000,
+            interval_ms: 200,
+        },
+        update_seq: 0,
+        current_value: None,
+    }];
+    server.start(&config, &folders, &nodes).await.expect("server start");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let ctx = egui::Context::default();
+    let (backend, mut rx) =
+        BackendHandle::new(ctx, "deadband-master", opcuamaster_egui::backend::dispatcher::run);
+
+    let mut saw_log = false;
+    backend.send(UiCommand::CreateConnection(CreateConnectionReq {
+        name: "deadband".into(),
+        endpoint_url: format!("opc.tcp://127.0.0.1:{DEADBAND_PORT}"),
+        security_policy: "None".into(),
+        security_mode: "None".into(),
+        auth: AuthKindReq::Anonymous,
+        timeout_ms: 5000,
+    }));
+    let conn_id = loop {
+        let ev = recv_until(&mut rx, 5, &mut saw_log, |e| matches!(e, BackendEvent::Connections(_))).await;
+        if let BackendEvent::Connections(list) = ev {
+            if let Some(c) = list.into_iter().find(|c| c.name == "deadband") {
+                break c.id;
+            }
+        }
+    };
+    backend.send(UiCommand::Connect(conn_id.clone()));
+    let _ = recv_until(&mut rx, 8, &mut saw_log, |e| {
+        matches!(e, BackendEvent::ConnectionStateChanged { state, .. } if state == "Connected")
+    })
+    .await;
+
+    backend.send(UiCommand::AddMonitoredNodes {
+        conn_id: conn_id.clone(),
+        nodes: vec![MonitoredNodeReq {
+            node_id: "ns=2;s=Demo.Sine".into(),
+            display_name: "Sine".into(),
+            data_type: Some("Double".into()),
+            access_mode: "Subscription".into(),
+            interval_ms: 200.0,
+            filter: Some(DataChangeFilterReq {
+                trigger: DataChangeTriggerKindReq::StatusValue,
+                deadband_kind: DeadbandKindReq::Absolute,
+                deadband_value: 5.0,
+            }),
+        }],
+    });
+
+    let mut distinct_values: std::collections::HashSet<String> = Default::default();
+    let mut snapshots_count: usize = 0;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    while tokio::time::Instant::now() < deadline {
+        let ev = tokio::time::timeout(Duration::from_millis(500), rx.recv())
+            .await
+            .ok()
+            .flatten();
+        if let Some(BackendEvent::MonitoredSnapshot { nodes, .. }) = ev {
+            for n in nodes {
+                if n.node_id == "ns=2;s=Demo.Sine" {
+                    snapshots_count += 1;
+                    if let Some(v) = n.value {
+                        distinct_values.insert(v);
+                    }
+                }
+            }
+        }
+    }
+
+    assert!(
+        distinct_values.len() <= 12,
+        "expected deadband to suppress most samples, got {} distinct values across {} snapshots: {:?}",
+        distinct_values.len(),
+        snapshots_count,
+        distinct_values,
+    );
+    assert!(
+        distinct_values.len() >= 2,
+        "expected at least 2 distinct values to confirm subscription is alive, got {distinct_values:?}"
+    );
+
     tokio::task::spawn_blocking(move || drop(backend))
         .await
         .expect("drop backend");

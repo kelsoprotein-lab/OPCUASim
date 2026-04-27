@@ -54,6 +54,60 @@ fn render_controls(ui: &mut egui::Ui, model: &mut AppModel) {
         ui.label("深度:");
         ui.add(egui::DragValue::new(&mut model.browse.max_depth).range(1..=10));
     });
+
+    egui::CollapsingHeader::new("高级 (DataChangeFilter)")
+        .id_salt("browse_advanced_filter")
+        .default_open(false)
+        .show(ui, |ui| {
+            ui.checkbox(&mut model.browse.filter_enabled, "启用 DataChangeFilter");
+            ui.add_enabled_ui(model.browse.filter_enabled, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label("Trigger:");
+                    egui::ComboBox::from_id_salt("filter_trigger")
+                        .selected_text(format!("{:?}", model.browse.trigger))
+                        .show_ui(ui, |ui| {
+                            for v in [
+                                crate::events::DataChangeTriggerKindReq::Status,
+                                crate::events::DataChangeTriggerKindReq::StatusValue,
+                                crate::events::DataChangeTriggerKindReq::StatusValueTimestamp,
+                            ] {
+                                ui.selectable_value(
+                                    &mut model.browse.trigger,
+                                    v,
+                                    format!("{v:?}"),
+                                );
+                            }
+                        });
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Deadband:");
+                    egui::ComboBox::from_id_salt("filter_deadband")
+                        .selected_text(format!("{:?}", model.browse.deadband_kind))
+                        .show_ui(ui, |ui| {
+                            for v in [
+                                crate::events::DeadbandKindReq::None,
+                                crate::events::DeadbandKindReq::Absolute,
+                                crate::events::DeadbandKindReq::Percent,
+                            ] {
+                                ui.selectable_value(
+                                    &mut model.browse.deadband_kind,
+                                    v,
+                                    format!("{v:?}"),
+                                );
+                            }
+                        });
+                    ui.add_enabled(
+                        !matches!(
+                            model.browse.deadband_kind,
+                            crate::events::DeadbandKindReq::None
+                        ),
+                        egui::DragValue::new(&mut model.browse.deadband_value)
+                            .range(0.0..=100_000.0)
+                            .speed(0.1),
+                    );
+                });
+            });
+        });
 }
 
 fn render_tree(
@@ -147,6 +201,7 @@ fn render_node(
                         access_mode: model.browse.access_mode.clone(),
                         interval_ms: model.browse.interval_ms,
                         max_depth: model.browse.max_depth,
+                        filter: model.current_filter_req(),
                     });
                     ui.close();
                 }
@@ -210,6 +265,7 @@ fn render_footer(
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.add_enabled_ui(selected_count > 0, |ui| {
                 if ui.button(format!("➕ 添加选中 ({selected_count})")).clicked() {
+                    let filter_req = model.current_filter_req();
                     let nodes: Vec<MonitoredNodeReq> = model
                         .browse
                         .selected
@@ -221,6 +277,7 @@ fn render_footer(
                             data_type: st.item.data_type.clone(),
                             access_mode: model.browse.access_mode.clone(),
                             interval_ms: model.browse.interval_ms,
+                            filter: filter_req,
                         })
                         .collect();
                     backend.send(UiCommand::AddMonitoredNodes {
