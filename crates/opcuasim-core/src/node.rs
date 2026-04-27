@@ -12,6 +12,32 @@ impl Default for AccessMode {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum DataChangeTriggerKind {
+    Status,
+    #[default]
+    StatusValue,
+    StatusValueTimestamp,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum DeadbandKind {
+    #[default]
+    None,
+    Absolute,
+    Percent,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Default)]
+pub struct DataChangeFilterCfg {
+    #[serde(default)]
+    pub trigger: DataChangeTriggerKind,
+    #[serde(default)]
+    pub deadband_kind: DeadbandKind,
+    #[serde(default)]
+    pub deadband_value: f64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MonitoredNode {
     pub node_id: String,
@@ -27,6 +53,8 @@ pub struct MonitoredNode {
     pub update_seq: u64,
     /// OPC UA UserAccessLevel bitmask (bit 0=Read, bit 1=Write). 0 = unknown.
     pub user_access_level: u8,
+    #[serde(default)]
+    pub filter: Option<DataChangeFilterCfg>,
 }
 
 impl MonitoredNode {
@@ -44,6 +72,7 @@ impl MonitoredNode {
             group_id: None,
             update_seq: 0,
             user_access_level: 0,
+            filter: None,
         }
     }
 }

@@ -5,10 +5,14 @@ use tokio::sync::RwLock;
 use log::info;
 
 use opcua_client::{DataChangeCallback, Session};
-use opcua_types::{MonitoredItemCreateRequest, NodeId, ReadValueId, TimestampsToReturn};
+use opcua_types::{
+    AttributeId, DataChangeFilter, DataChangeTrigger, ExtensionObject, MonitoredItemCreateRequest,
+    MonitoringMode, MonitoringParameters, NodeId, NumericRange, QualifiedName, ReadValueId,
+    TimestampsToReturn,
+};
 
 use crate::error::OpcUaSimError;
-use crate::node::MonitoredNode;
+use crate::node::{DataChangeFilterCfg, DataChangeTriggerKind, DeadbandKind, MonitoredNode};
 use crate::output::DataChangeItem;
 
 #[derive(Clone)]
@@ -45,9 +49,35 @@ impl SubscriptionManager {
         if let Some(session) = session {
             let sub_id = self.ensure_subscription(session).await?;
 
-            let items_to_create: Vec<MonitoredItemCreateRequest> = nodes.iter()
+            let items_to_create: Vec<MonitoredItemCreateRequest> = nodes
+                .iter()
                 .filter_map(|n| {
-                    n.node_id.parse::<NodeId>().ok().map(|nid| nid.into())
+                    let nid: NodeId = n.node_id.parse().ok()?;
+                    let interval_ms = match &n.access_mode {
+                        crate::node::AccessMode::Subscription { interval_ms } => *interval_ms,
+                        crate::node::AccessMode::Polling { .. } => 1000.0,
+                    };
+                    let filter_obj = n
+                        .filter
+                        .as_ref()
+                        .map(filter_cfg_to_extension_object)
+                        .unwrap_or_else(ExtensionObject::null);
+                    Some(MonitoredItemCreateRequest {
+                        item_to_monitor: ReadValueId {
+                            node_id: nid,
+                            attribute_id: AttributeId::Value as u32,
+                            index_range: NumericRange::None,
+                            data_encoding: QualifiedName::null(),
+                        },
+                        monitoring_mode: MonitoringMode::Reporting,
+                        requested_parameters: MonitoringParameters {
+                            client_handle: 0,
+                            sampling_interval: interval_ms,
+                            filter: filter_obj,
+                            queue_size: 1,
+                            discard_oldest: true,
+                        },
+                    })
                 })
                 .collect();
 
@@ -341,4 +371,22 @@ impl Default for SubscriptionManager {
     fn default() -> Self {
         Self::new()
     }
+}
+
+fn filter_cfg_to_extension_object(cfg: &DataChangeFilterCfg) -> ExtensionObject {
+    let trigger = match cfg.trigger {
+        DataChangeTriggerKind::Status => DataChangeTrigger::Status,
+        DataChangeTriggerKind::StatusValue => DataChangeTrigger::StatusValue,
+        DataChangeTriggerKind::StatusValueTimestamp => DataChangeTrigger::StatusValueTimestamp,
+    };
+    let deadband_type: u32 = match cfg.deadband_kind {
+        DeadbandKind::None => 0,
+        DeadbandKind::Absolute => 1,
+        DeadbandKind::Percent => 2,
+    };
+    ExtensionObject::from_message(DataChangeFilter {
+        trigger,
+        deadband_type,
+        deadband_value: cfg.deadband_value,
+    })
 }
