@@ -8,6 +8,7 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use opcuasim_core::client::{ConnectionState, OpcUaConnection};
+use opcuasim_core::discovery::discover_endpoints;
 use opcuasim_core::config::{AuthConfig, ConnectionConfig, ConnectionProjectEntry, ProjectFile};
 use opcuasim_core::node::{AccessMode, MonitoredNode, NodeGroup};
 use opcuasim_core::polling::PollingManager;
@@ -15,8 +16,9 @@ use opcuasim_core::subscription::SubscriptionManager;
 
 use crate::backend::state::{BackendState, ConnectionEntry};
 use crate::events::{
-    AuthKindReq, BackendEvent, BrowseItem, ConnectionInfo, CreateConnectionReq, LogRow,
-    MonitoredNodeReq, MonitoredRow, NodeAttrsDto, NodeGroupDto, ToastLevel, UiCommand,
+    AuthKindReq, BackendEvent, BrowseItem, ConnectionInfo, CreateConnectionReq,
+    DiscoveredEndpointDto, LogRow, MonitoredNodeReq, MonitoredRow, NodeAttrsDto, NodeGroupDto,
+    ToastLevel, UiCommand,
 };
 
 pub async fn run(
@@ -132,6 +134,11 @@ async fn handle_cmd(
 ) {
     let result: Result<(), String> = match cmd {
         UiCommand::CreateConnection(req) => create_connection(req, &state, &event_tx).await,
+        UiCommand::DiscoverEndpoints {
+            url,
+            timeout_ms,
+            req_id,
+        } => do_discover_endpoints(url, timeout_ms, req_id, &event_tx).await,
         UiCommand::Connect(id) => connect(id, &state, &event_tx).await,
         UiCommand::Disconnect(id) => disconnect(id, &state, &event_tx).await,
         UiCommand::DeleteConnection(id) => delete_connection(id, &state, &event_tx).await,
@@ -887,4 +894,34 @@ async fn get_session(
     guard
         .clone()
         .ok_or_else(|| "Not connected — no active session".to_string())
+}
+
+async fn do_discover_endpoints(
+    url: String,
+    timeout_ms: u64,
+    req_id: u64,
+    event_tx: &UnboundedSender<BackendEvent>,
+) -> Result<(), String> {
+    match discover_endpoints(&url, timeout_ms).await {
+        Ok(list) => {
+            let endpoints: Vec<DiscoveredEndpointDto> = list
+                .into_iter()
+                .map(|e| DiscoveredEndpointDto {
+                    endpoint_url: e.endpoint_url,
+                    security_policy: e.security_policy,
+                    security_mode: e.security_mode,
+                    security_level: e.security_level,
+                    server_cert_thumbprint: e.server_cert_thumbprint,
+                    user_token_policy_ids: e
+                        .user_token_policies
+                        .into_iter()
+                        .map(|t| t.policy_id)
+                        .collect(),
+                })
+                .collect();
+            let _ = event_tx.send(BackendEvent::EndpointsDiscovered { req_id, endpoints });
+            Ok(())
+        }
+        Err(e) => Err(format!("Discovery failed: {e}")),
+    }
 }

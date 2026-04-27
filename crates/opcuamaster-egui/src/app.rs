@@ -150,6 +150,15 @@ impl MasterApp {
             BackendEvent::Groups(list) => {
                 self.model.groups = list;
             }
+            BackendEvent::EndpointsDiscovered { req_id, endpoints } => {
+                if let Some(Modal::NewConnection(state)) = self.model.modal.as_mut() {
+                    if state.discovery_req_id == Some(req_id) {
+                        state.discovered = endpoints;
+                        state.discovery_in_flight = false;
+                        state.discovery_req_id = None;
+                    }
+                }
+            }
             BackendEvent::Toast { level, message } => {
                 self.model.push_toast(level, message);
             }
@@ -157,18 +166,32 @@ impl MasterApp {
     }
 
     fn render_modal(&mut self, ctx: &egui::Context) {
-        let Some(modal) = &mut self.model.modal else {
+        let Some(mut modal) = self.model.modal.take() else {
             return;
         };
-        match modal {
+        match &mut modal {
             Modal::NewConnection(state) => {
                 let mut close = false;
-                let submitted = connection_dialog::show(ctx, state, &mut close);
-                if let Some(req) = submitted {
+                let actions = connection_dialog::show(ctx, state, &mut close);
+                if let Some(req) = actions.submit {
                     self.backend.send(UiCommand::CreateConnection(req));
                 }
-                if close {
-                    self.model.modal = None;
+                if let Some((url, timeout_ms)) = actions.discover {
+                    if !url.is_empty() {
+                        let req_id = self.model.alloc_req_id();
+                        state.discovery_in_flight = true;
+                        state.discovery_req_id = Some(req_id);
+                        state.discovered.clear();
+                        state.error = None;
+                        self.backend.send(UiCommand::DiscoverEndpoints {
+                            url,
+                            timeout_ms,
+                            req_id,
+                        });
+                    }
+                }
+                if !close {
+                    self.model.modal = Some(modal);
                 }
             }
         }

@@ -3,6 +3,11 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone)]
 pub enum UiCommand {
     CreateConnection(CreateConnectionReq),
+    DiscoverEndpoints {
+        url: String,
+        timeout_ms: u64,
+        req_id: u64,
+    },
     Connect(String),
     Disconnect(String),
     DeleteConnection(String),
@@ -119,10 +124,24 @@ pub enum BackendEvent {
         conn_id: String,
     },
     Groups(Vec<NodeGroupDto>),
+    EndpointsDiscovered {
+        req_id: u64,
+        endpoints: Vec<DiscoveredEndpointDto>,
+    },
     Toast {
         level: ToastLevel,
         message: String,
     },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DiscoveredEndpointDto {
+    pub endpoint_url: String,
+    pub security_policy: String,
+    pub security_mode: String,
+    pub security_level: u8,
+    pub server_cert_thumbprint: String,
+    pub user_token_policy_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
