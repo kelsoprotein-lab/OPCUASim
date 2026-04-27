@@ -74,6 +74,18 @@ pub enum UiCommand {
     DeleteCertificate {
         path: std::path::PathBuf,
     },
+    ReadMethodArgs {
+        conn_id: String,
+        method_id: String,
+        req_id: u64,
+    },
+    CallMethod {
+        conn_id: String,
+        object_id: String,
+        method_id: String,
+        inputs: Vec<MethodArgValue>,
+        req_id: u64,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -124,6 +136,19 @@ pub struct DataChangeFilterReq {
     pub deadband_value: f64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MethodArgInfo {
+    pub name: String,
+    pub data_type: String,
+    pub description: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MethodArgValue {
+    pub data_type: String,
+    pub value: String,
+}
+
 #[derive(Debug, Clone)]
 pub enum BackendEvent {
     Connections(Vec<ConnectionInfo>),
@@ -166,6 +191,16 @@ pub enum BackendEvent {
         req_id: u64,
         role: CertRoleDto,
         certs: Vec<CertSummaryDto>,
+    },
+    MethodArgs {
+        req_id: u64,
+        inputs: Vec<MethodArgInfo>,
+        outputs: Vec<MethodArgInfo>,
+    },
+    MethodCallResult {
+        req_id: u64,
+        status: String,
+        outputs: Vec<MethodArgValue>,
     },
     Toast {
         level: ToastLevel,

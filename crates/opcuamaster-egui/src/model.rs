@@ -64,6 +64,7 @@ impl AppModel {
 pub enum Modal {
     NewConnection(ConnDialogState),
     CertManager(CertManagerState),
+    MethodCall(MethodCallState),
 }
 
 #[derive(Default)]
@@ -74,6 +75,45 @@ pub struct CertManagerState {
     pub pending_rejected_req: Option<u64>,
     pub selected_path: Option<std::path::PathBuf>,
     pub error: Option<String>,
+}
+
+pub struct MethodCallState {
+    pub conn_id: String,
+    pub object_id: String,
+    pub method_id: String,
+    pub display_name: String,
+    pub inputs_meta: Vec<crate::events::MethodArgInfo>,
+    pub outputs_meta: Vec<crate::events::MethodArgInfo>,
+    pub input_values: Vec<String>,
+    pub pending_args_req: Option<u64>,
+    pub pending_call_req: Option<u64>,
+    pub last_result_status: Option<String>,
+    pub last_result_outputs: Vec<crate::events::MethodArgValue>,
+    pub error: Option<String>,
+}
+
+impl MethodCallState {
+    pub fn new(
+        conn_id: String,
+        object_id: String,
+        method_id: String,
+        display_name: String,
+    ) -> Self {
+        Self {
+            conn_id,
+            object_id,
+            method_id,
+            display_name,
+            inputs_meta: Vec::new(),
+            outputs_meta: Vec::new(),
+            input_values: Vec::new(),
+            pending_args_req: None,
+            pending_call_req: None,
+            last_result_status: None,
+            last_result_outputs: Vec::new(),
+            error: None,
+        }
+    }
 }
 
 pub struct BrowseState {

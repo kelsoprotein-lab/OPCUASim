@@ -12,6 +12,7 @@ path = "src/main.rs"
 [dependencies]
 opcuasim-core = { path = "../opcuasim-core" }
 opcuaegui-shared = { path = "../opcuaegui-shared" }
+async-opcua-types = "0.18"
 eframe.workspace = true
 egui.workspace = true
 egui_extras.workspace = true

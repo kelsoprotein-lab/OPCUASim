@@ -159,6 +159,33 @@ impl MasterApp {
                     }
                 }
             }
+            BackendEvent::MethodArgs {
+                req_id,
+                inputs,
+                outputs,
+            } => {
+                if let Some(Modal::MethodCall(state)) = self.model.modal.as_mut() {
+                    if state.pending_args_req == Some(req_id) {
+                        state.pending_args_req = None;
+                        state.input_values = inputs.iter().map(default_input_for).collect();
+                        state.inputs_meta = inputs;
+                        state.outputs_meta = outputs;
+                    }
+                }
+            }
+            BackendEvent::MethodCallResult {
+                req_id,
+                status,
+                outputs,
+            } => {
+                if let Some(Modal::MethodCall(state)) = self.model.modal.as_mut() {
+                    if state.pending_call_req == Some(req_id) {
+                        state.pending_call_req = None;
+                        state.last_result_status = Some(status);
+                        state.last_result_outputs = outputs;
+                    }
+                }
+            }
             BackendEvent::CertificateList { req_id, role, certs } => {
                 if let Some(Modal::CertManager(state)) = self.model.modal.as_mut() {
                     match role {
@@ -209,6 +236,25 @@ impl MasterApp {
                     }
                 }
                 if !close {
+                    self.model.modal = Some(modal);
+                }
+            }
+            Modal::MethodCall(state) => {
+                let actions = crate::widgets::method_call_dialog::show(ctx, state);
+                if let Some(inputs) = actions.call {
+                    let req_id = self.model.alloc_req_id();
+                    state.pending_call_req = Some(req_id);
+                    state.last_result_status = None;
+                    state.last_result_outputs.clear();
+                    self.backend.send(UiCommand::CallMethod {
+                        conn_id: state.conn_id.clone(),
+                        object_id: state.object_id.clone(),
+                        method_id: state.method_id.clone(),
+                        inputs,
+                        req_id,
+                    });
+                }
+                if !actions.close {
                     self.model.modal = Some(modal);
                 }
             }
@@ -339,5 +385,14 @@ impl eframe::App for MasterApp {
                 },
             );
         }
+    }
+}
+
+fn default_input_for(arg: &crate::events::MethodArgInfo) -> String {
+    match arg.data_type.as_str() {
+        "Boolean" => "false".into(),
+        "String" => "".into(),
+        "Float" | "Double" => "0.0".into(),
+        _ => "0".into(),
     }
 }

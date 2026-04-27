@@ -145,13 +145,19 @@ fn render_node(
     backend: &BackendHandle,
     conn_id: &str,
 ) {
-    let (display, has_children, is_variable, loading, children) = {
+    let (display, has_children, is_variable, is_method, loading, children) = {
         let Some(st) = model.browse.nodes.get(node_id) else {
             return;
         };
+        let icon = match st.item.node_class.as_str() {
+            "Method" => "⚙",
+            "Object" => "📁",
+            "Variable" => "🔢",
+            _ => "•",
+        };
         (
             format!(
-                "{}  [{}]{}",
+                "{icon}  {}  [{}]{}",
                 st.item.display_name,
                 st.item.node_class,
                 st.item
@@ -162,6 +168,7 @@ fn render_node(
             ),
             st.item.has_children,
             st.item.node_class == "Variable",
+            st.item.node_class == "Method",
             st.loading,
             st.children.clone(),
         )
@@ -217,9 +224,51 @@ fn render_node(
                 toggle_selection(model, node_id, checked);
             }
         });
+    } else if is_method {
+        ui.horizontal(|ui| {
+            let resp = ui.label(display);
+            resp.context_menu(|ui| {
+                if ui.button("⚙ 调用方法...").clicked() {
+                    let parent_id = find_parent_object(model, node_id)
+                        .unwrap_or_else(|| node_id.to_string());
+                    let display_name = model
+                        .browse
+                        .nodes
+                        .get(node_id)
+                        .map(|s| s.item.display_name.clone())
+                        .unwrap_or_else(|| node_id.to_string());
+                    let req_id = model.alloc_req_id();
+                    let mut s = crate::model::MethodCallState::new(
+                        conn_id.to_string(),
+                        parent_id,
+                        node_id.to_string(),
+                        display_name,
+                    );
+                    s.pending_args_req = Some(req_id);
+                    model.modal = Some(crate::model::Modal::MethodCall(s));
+                    backend.send(UiCommand::ReadMethodArgs {
+                        conn_id: conn_id.to_string(),
+                        method_id: node_id.to_string(),
+                        req_id,
+                    });
+                    ui.close();
+                }
+            });
+        });
     } else {
         ui.label(display);
     }
+}
+
+fn find_parent_object(model: &AppModel, node_id: &str) -> Option<String> {
+    for (pid, st) in &model.browse.nodes {
+        if let Some(kids) = &st.children {
+            if kids.iter().any(|k| k == node_id) {
+                return Some(pid.clone());
+            }
+        }
+    }
+    None
 }
 
 fn toggle_selection(model: &mut AppModel, node_id: &str, checked: bool) {

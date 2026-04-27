@@ -12,6 +12,7 @@ use opcuasim_core::cert_manager::{
 };
 use opcuasim_core::client::{ConnectionState, OpcUaConnection};
 use opcuasim_core::discovery::discover_endpoints;
+use opcuasim_core::method::{call_method, read_method_arguments};
 use opcuasim_core::config::{AuthConfig, ConnectionConfig, ConnectionProjectEntry, ProjectFile};
 use opcuasim_core::node::{
     AccessMode, DataChangeFilterCfg, DataChangeTriggerKind, DeadbandKind, MonitoredNode, NodeGroup,
@@ -23,8 +24,8 @@ use crate::backend::state::{BackendState, ConnectionEntry};
 use crate::events::{
     AuthKindReq, BackendEvent, BrowseItem, CertRoleDto, CertSummaryDto, ConnectionInfo,
     CreateConnectionReq, DataChangeFilterReq, DataChangeTriggerKindReq, DeadbandKindReq,
-    DiscoveredEndpointDto, LogRow, MonitoredNodeReq, MonitoredRow, NodeAttrsDto, NodeGroupDto,
-    ToastLevel, UiCommand,
+    DiscoveredEndpointDto, LogRow, MethodArgInfo, MethodArgValue, MonitoredNodeReq, MonitoredRow,
+    NodeAttrsDto, NodeGroupDto, ToastLevel, UiCommand,
 };
 
 pub async fn run(
@@ -212,6 +213,23 @@ async fn handle_cmd(
             do_move_cert(path, to_role, &event_tx).await
         }
         UiCommand::DeleteCertificate { path } => do_delete_cert(path, &event_tx).await,
+        UiCommand::ReadMethodArgs {
+            conn_id,
+            method_id,
+            req_id,
+        } => do_read_method_args(conn_id, method_id, req_id, &state, &event_tx).await,
+        UiCommand::CallMethod {
+            conn_id,
+            object_id,
+            method_id,
+            inputs,
+            req_id,
+        } => {
+            do_call_method(
+                conn_id, object_id, method_id, inputs, req_id, &state, &event_tx,
+            )
+            .await
+        }
     };
 
     if let Err(e) = result {
@@ -1038,4 +1056,119 @@ async fn do_delete_cert(
 #[allow(dead_code)]
 fn _cert_manager_keep() -> &'static str {
     cert_manager::CertRole::Trusted.dir_name()
+}
+
+async fn do_read_method_args(
+    conn_id: String,
+    method_id: String,
+    req_id: u64,
+    state: &Arc<BackendState>,
+    event_tx: &UnboundedSender<BackendEvent>,
+) -> Result<(), String> {
+    let session = get_session(state, &conn_id).await?;
+    let nid: opcua_types::NodeId = method_id
+        .parse()
+        .map_err(|_| format!("invalid node id: {method_id}"))?;
+    let info = read_method_arguments(&session, &nid)
+        .await
+        .map_err(|e| e.to_string())?;
+    let inputs = info
+        .inputs
+        .into_iter()
+        .map(|a| MethodArgInfo {
+            name: a.name,
+            data_type: a.data_type,
+            description: a.description,
+        })
+        .collect();
+    let outputs = info
+        .outputs
+        .into_iter()
+        .map(|a| MethodArgInfo {
+            name: a.name,
+            data_type: a.data_type,
+            description: a.description,
+        })
+        .collect();
+    let _ = event_tx.send(BackendEvent::MethodArgs {
+        req_id,
+        inputs,
+        outputs,
+    });
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn do_call_method(
+    conn_id: String,
+    object_id: String,
+    method_id: String,
+    inputs: Vec<MethodArgValue>,
+    req_id: u64,
+    state: &Arc<BackendState>,
+    event_tx: &UnboundedSender<BackendEvent>,
+) -> Result<(), String> {
+    let session = get_session(state, &conn_id).await?;
+    let oid: opcua_types::NodeId = object_id
+        .parse()
+        .map_err(|_| format!("invalid object id: {object_id}"))?;
+    let mid: opcua_types::NodeId = method_id
+        .parse()
+        .map_err(|_| format!("invalid method id: {method_id}"))?;
+
+    let variants: Vec<opcua_types::Variant> = inputs
+        .iter()
+        .map(|a| string_to_variant(&a.data_type, &a.value))
+        .collect::<Result<_, String>>()?;
+
+    let outcome = call_method(&session, &oid, &mid, variants)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let outputs: Vec<MethodArgValue> = outcome
+        .outputs
+        .into_iter()
+        .map(|v| MethodArgValue {
+            data_type: variant_type_label(&v),
+            value: format!("{v}"),
+        })
+        .collect();
+
+    let _ = event_tx.send(BackendEvent::MethodCallResult {
+        req_id,
+        status: format!("{}", outcome.status),
+        outputs,
+    });
+    Ok(())
+}
+
+fn string_to_variant(data_type: &str, value: &str) -> Result<opcua_types::Variant, String> {
+    use opcua_types::Variant;
+    match data_type {
+        "Boolean" => value
+            .parse::<bool>()
+            .map(Variant::Boolean)
+            .map_err(|e| e.to_string()),
+        "SByte" => value.parse::<i8>().map(Variant::SByte).map_err(|e| e.to_string()),
+        "Byte" => value.parse::<u8>().map(Variant::Byte).map_err(|e| e.to_string()),
+        "Int16" => value.parse::<i16>().map(Variant::Int16).map_err(|e| e.to_string()),
+        "UInt16" => value.parse::<u16>().map(Variant::UInt16).map_err(|e| e.to_string()),
+        "Int32" => value.parse::<i32>().map(Variant::Int32).map_err(|e| e.to_string()),
+        "UInt32" => value.parse::<u32>().map(Variant::UInt32).map_err(|e| e.to_string()),
+        "Int64" => value.parse::<i64>().map(Variant::Int64).map_err(|e| e.to_string()),
+        "UInt64" => value.parse::<u64>().map(Variant::UInt64).map_err(|e| e.to_string()),
+        "Float" => value.parse::<f32>().map(Variant::Float).map_err(|e| e.to_string()),
+        "Double" => value.parse::<f64>().map(Variant::Double).map_err(|e| e.to_string()),
+        "String" => Ok(Variant::String(value.into())),
+        other => Err(format!("unsupported method arg type: {other}")),
+    }
+}
+
+fn variant_type_label(v: &opcua_types::Variant) -> String {
+    use opcua_types::variant::VariantTypeId;
+    match v.type_id() {
+        VariantTypeId::Empty => "Empty".to_string(),
+        VariantTypeId::Scalar(s) => format!("{s}"),
+        VariantTypeId::Array(s, _) => format!("Array<{s}>"),
+    }
 }

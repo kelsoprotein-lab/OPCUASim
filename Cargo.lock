@@ -2725,6 +2725,7 @@ name = "opcuamaster-egui"
 version = "0.2.0"
 dependencies = [
  "anyhow",
+ "async-opcua-types",
  "chrono",
  "csv",
  "eframe",

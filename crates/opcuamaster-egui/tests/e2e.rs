@@ -9,10 +9,11 @@ use opcuasim_core::server::models::{
     DataType, ServerConfig, ServerFolder, ServerNode, SimulationMode,
 };
 use opcuasim_core::server::server::OpcUaServer;
+use opcuasim_core::server::test_methods::register_demo_echo_method;
 
 use opcuamaster_egui::events::{
     AuthKindReq, BackendEvent, CreateConnectionReq, DataChangeFilterReq, DataChangeTriggerKindReq,
-    DeadbandKindReq, MonitoredNodeReq, UiCommand,
+    DeadbandKindReq, MethodArgValue, MonitoredNodeReq, UiCommand,
 };
 use opcuamaster_egui::runtime::BackendHandle;
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -417,6 +418,105 @@ async fn deadband_reduces_samples() {
     assert!(
         distinct_values.len() >= 2,
         "expected at least 2 distinct values to confirm subscription is alive, got {distinct_values:?}"
+    );
+
+    tokio::task::spawn_blocking(move || drop(backend))
+        .await
+        .expect("drop backend");
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    server.stop().await.expect("server stop");
+}
+
+const ECHO_PORT: u16 = 48412;
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn method_call_echo() {
+    let server = Arc::new(OpcUaServer::new());
+    let config = ServerConfig {
+        name: "EchoTestServer".into(),
+        endpoint_url: format!("opc.tcp://127.0.0.1:{ECHO_PORT}"),
+        port: ECHO_PORT,
+        security_policies: vec!["None".into()],
+        security_modes: vec!["None".into()],
+        users: Vec::new(),
+        anonymous_enabled: true,
+        max_sessions: 10,
+        max_subscriptions_per_session: 10,
+    };
+    server.start(&config, &[], &[]).await.expect("server start");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let method_id = register_demo_echo_method(&server)
+        .await
+        .expect("register echo");
+    let method_id_str = format!("{method_id}");
+
+    let ctx = egui::Context::default();
+    let (backend, mut rx) =
+        BackendHandle::new(ctx, "echo-master", opcuamaster_egui::backend::dispatcher::run);
+
+    let mut saw_log = false;
+    backend.send(UiCommand::CreateConnection(CreateConnectionReq {
+        name: "echo".into(),
+        endpoint_url: format!("opc.tcp://127.0.0.1:{ECHO_PORT}"),
+        security_policy: "None".into(),
+        security_mode: "None".into(),
+        auth: AuthKindReq::Anonymous,
+        timeout_ms: 5000,
+    }));
+    let conn_id = loop {
+        let ev = recv_until(&mut rx, 5, &mut saw_log, |e| matches!(e, BackendEvent::Connections(_))).await;
+        if let BackendEvent::Connections(list) = ev {
+            if let Some(c) = list.into_iter().find(|c| c.name == "echo") {
+                break c.id;
+            }
+        }
+    };
+    backend.send(UiCommand::Connect(conn_id.clone()));
+    let _ = recv_until(&mut rx, 8, &mut saw_log, |e| {
+        matches!(e, BackendEvent::ConnectionStateChanged { state, .. } if state == "Connected")
+    })
+    .await;
+
+    backend.send(UiCommand::ReadMethodArgs {
+        conn_id: conn_id.clone(),
+        method_id: method_id_str.clone(),
+        req_id: 30,
+    });
+    let args_ev = recv_until(&mut rx, 5, &mut saw_log, |e| {
+        matches!(e, BackendEvent::MethodArgs { req_id: 30, .. })
+    })
+    .await;
+    let BackendEvent::MethodArgs { inputs, .. } = args_ev else {
+        unreachable!()
+    };
+    assert_eq!(inputs.len(), 1, "expected 1 input arg, got {inputs:?}");
+    assert_eq!(inputs[0].name, "input");
+    assert_eq!(inputs[0].data_type, "String");
+
+    backend.send(UiCommand::CallMethod {
+        conn_id: conn_id.clone(),
+        object_id: "i=85".into(),
+        method_id: method_id_str.clone(),
+        inputs: vec![MethodArgValue {
+            data_type: "String".into(),
+            value: "hello".into(),
+        }],
+        req_id: 31,
+    });
+    let call_ev = recv_until(&mut rx, 5, &mut saw_log, |e| {
+        matches!(e, BackendEvent::MethodCallResult { req_id: 31, .. })
+    })
+    .await;
+    let BackendEvent::MethodCallResult { status, outputs, .. } = call_ev else {
+        unreachable!()
+    };
+    assert!(status.contains("Good"), "expected Good status, got {status}");
+    assert_eq!(outputs.len(), 1, "expected 1 output, got {outputs:?}");
+    assert!(
+        outputs[0].value.contains("hello"),
+        "expected output to contain 'hello', got {:?}",
+        outputs[0].value
     );
 
     tokio::task::spawn_blocking(move || drop(backend))
