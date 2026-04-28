@@ -186,6 +186,24 @@ impl MasterApp {
                     }
                 }
             }
+            BackendEvent::HistoryResult {
+                req_id,
+                node_id,
+                points,
+                error,
+            } => {
+                if let Some(tab) = self
+                    .model
+                    .history_tabs
+                    .iter_mut()
+                    .find(|t| t.pending_req == Some(req_id) && t.node_id == node_id)
+                {
+                    tab.pending_req = None;
+                    tab.points = points;
+                    tab.error = error;
+                    tab.last_loaded = Some(std::time::Instant::now());
+                }
+            }
             BackendEvent::CertificateList { req_id, role, certs } => {
                 if let Some(Modal::CertManager(state)) = self.model.modal.as_mut() {
                     match role {
@@ -366,7 +384,77 @@ impl eframe::App for MasterApp {
                 });
 
             egui::CentralPanel::default().show_inside(ui, |ui| {
-                data_table::show(ui, &mut self.model, &self.backend);
+                ui.horizontal(|ui| {
+                    if ui
+                        .selectable_label(
+                            matches!(
+                                self.model.central_tab,
+                                crate::model::CentralPanelTab::DataTable
+                            ),
+                            "📊 监控表",
+                        )
+                        .clicked()
+                    {
+                        self.model.central_tab = crate::model::CentralPanelTab::DataTable;
+                    }
+                    let mut clicked_tab: Option<usize> = None;
+                    for (i, tab) in self.model.history_tabs.iter().enumerate() {
+                        let label = format!("📈 {}", tab.display_name);
+                        let selected = matches!(
+                            self.model.central_tab,
+                            crate::model::CentralPanelTab::History(j) if j == i
+                        );
+                        if ui.selectable_label(selected, &label).clicked() {
+                            clicked_tab = Some(i);
+                        }
+                    }
+                    if let Some(i) = clicked_tab {
+                        self.model.central_tab = crate::model::CentralPanelTab::History(i);
+                    }
+                });
+                ui.separator();
+
+                match self.model.central_tab.clone() {
+                    crate::model::CentralPanelTab::DataTable => {
+                        data_table::show(ui, &mut self.model, &self.backend);
+                    }
+                    crate::model::CentralPanelTab::History(idx) => {
+                        let mut close_idx: Option<usize> = None;
+                        if let Some(state) = self.model.history_tabs.get_mut(idx) {
+                            if state.pending_req.is_none() && state.last_loaded.is_none() {
+                                crate::panels::history_tab::dispatch_refresh(
+                                    state,
+                                    &self.backend,
+                                    &mut self.model.next_req_id,
+                                );
+                            }
+                            let actions = crate::panels::history_tab::show(ui, state);
+                            if actions.refresh {
+                                crate::panels::history_tab::dispatch_refresh(
+                                    state,
+                                    &self.backend,
+                                    &mut self.model.next_req_id,
+                                );
+                            }
+                            if actions.close {
+                                close_idx = Some(idx);
+                            }
+                        } else {
+                            self.model.central_tab = crate::model::CentralPanelTab::DataTable;
+                        }
+                        if let Some(i) = close_idx {
+                            self.model.history_tabs.remove(i);
+                            if self.model.history_tabs.is_empty() {
+                                self.model.central_tab =
+                                    crate::model::CentralPanelTab::DataTable;
+                            } else {
+                                let new_idx = i.min(self.model.history_tabs.len() - 1);
+                                self.model.central_tab =
+                                    crate::model::CentralPanelTab::History(new_idx);
+                            }
+                        }
+                    }
+                }
             });
         });
 

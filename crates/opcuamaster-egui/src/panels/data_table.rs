@@ -73,6 +73,8 @@ pub fn show(ui: &mut egui::Ui, model: &mut AppModel, backend: &BackendHandle) {
     let ctx_modifiers = ui.ctx().input(|i| i.modifiers);
     let ctrl_held = ctx_modifiers.ctrl || ctx_modifiers.command;
 
+    let mut history_request: Option<(String, String)> = None;
+
     let mut table = TableBuilder::new(ui)
         .striped(true)
         .resizable(true)
@@ -136,7 +138,8 @@ pub fn show(ui: &mut egui::Ui, model: &mut AppModel, backend: &BackendHandle) {
                     ui.label(format!("{} · {:.0}ms", data.access_mode, data.interval_ms));
                 });
 
-                if row.response().clicked() {
+                let row_resp = row.response();
+                if row_resp.clicked() {
                     if ctrl_held {
                         if selected {
                             model.monitor.selected_rows.remove(node_id);
@@ -152,7 +155,19 @@ pub fn show(ui: &mut egui::Ui, model: &mut AppModel, backend: &BackendHandle) {
                     model.value_panel.write_value.clear();
                     model.value_panel.last_result = None;
                 }
+                let nid = data.node_id.clone();
+                let dname = data.display_name.clone();
+                row_resp.context_menu(|ui| {
+                    if ui.button("📈 查看历史").clicked() {
+                        history_request = Some((nid.clone(), dname.clone()));
+                        ui.close();
+                    }
+                });
             });
         });
+
+    if let Some((nid, dname)) = history_request {
+        crate::panels::browse_panel::open_history_tab(model, &conn_id, &nid, &dname);
+    }
 }
 

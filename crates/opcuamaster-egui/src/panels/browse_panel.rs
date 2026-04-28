@@ -218,10 +218,24 @@ fn render_node(
             }
         });
     } else if is_variable {
-        ui.horizontal(|ui| {
-            let mut checked = model.browse.selected.contains(node_id);
-            if ui.checkbox(&mut checked, &display).changed() {
-                toggle_selection(model, node_id, checked);
+        let display_name = model
+            .browse
+            .nodes
+            .get(node_id)
+            .map(|s| s.item.display_name.clone())
+            .unwrap_or_else(|| node_id.to_string());
+        let resp = ui
+            .horizontal(|ui| {
+                let mut checked = model.browse.selected.contains(node_id);
+                if ui.checkbox(&mut checked, &display).changed() {
+                    toggle_selection(model, node_id, checked);
+                }
+            })
+            .response;
+        resp.context_menu(|ui| {
+            if ui.button("📈 查看历史").clicked() {
+                open_history_tab(model, conn_id, node_id, &display_name);
+                ui.close();
             }
         });
     } else if is_method {
@@ -269,6 +283,21 @@ fn find_parent_object(model: &AppModel, node_id: &str) -> Option<String> {
         }
     }
     None
+}
+
+pub fn open_history_tab(
+    model: &mut AppModel,
+    conn_id: &str,
+    node_id: &str,
+    display_name: &str,
+) {
+    let idx = model.history_tabs.len();
+    model.history_tabs.push(crate::model::HistoryTabState::new(
+        conn_id.to_string(),
+        node_id.to_string(),
+        display_name.to_string(),
+    ));
+    model.central_tab = crate::model::CentralPanelTab::History(idx);
 }
 
 fn toggle_selection(model: &mut AppModel, node_id: &str, checked: bool) {

@@ -5,7 +5,6 @@ use indexmap::IndexMap;
 use crate::events::{BrowseItem, ConnectionInfo, LogRow, MonitoredRow, NodeAttrsDto, NodeGroupDto};
 use crate::widgets::connection_dialog::ConnDialogState;
 
-#[derive(Default)]
 pub struct AppModel {
     pub connections: Vec<ConnectionInfo>,
     pub selected_conn: Option<String>,
@@ -18,6 +17,66 @@ pub struct AppModel {
     pub group_input: String,
     pub toasts: Vec<Toast>,
     pub next_req_id: u64,
+    pub central_tab: CentralPanelTab,
+    pub history_tabs: Vec<HistoryTabState>,
+}
+
+impl Default for AppModel {
+    fn default() -> Self {
+        Self {
+            connections: Vec::new(),
+            selected_conn: None,
+            modal: None,
+            browse: BrowseState::default(),
+            monitor: MonitorState::default(),
+            value_panel: ValuePanelState::default(),
+            logs: LogState::default(),
+            groups: Vec::new(),
+            group_input: String::new(),
+            toasts: Vec::new(),
+            next_req_id: 0,
+            central_tab: CentralPanelTab::DataTable,
+            history_tabs: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CentralPanelTab {
+    DataTable,
+    History(usize),
+}
+
+pub struct HistoryTabState {
+    pub conn_id: String,
+    pub node_id: String,
+    pub display_name: String,
+    pub start_iso: String,
+    pub end_iso: String,
+    pub max_values: u32,
+    pub points: Vec<crate::events::HistoryPointDto>,
+    pub pending_req: Option<u64>,
+    pub error: Option<String>,
+    pub last_loaded: Option<std::time::Instant>,
+}
+
+impl HistoryTabState {
+    pub fn new(conn_id: String, node_id: String, display_name: String) -> Self {
+        let now = chrono::Utc::now();
+        let start = now - chrono::Duration::minutes(5);
+        Self {
+            conn_id,
+            node_id,
+            display_name,
+            start_iso: start.to_rfc3339(),
+            end_iso: now.to_rfc3339(),
+            max_values: 5000,
+            points: Vec::new(),
+            pending_req: None,
+            error: None,
+            last_loaded: None,
+        }
+    }
 }
 
 impl AppModel {

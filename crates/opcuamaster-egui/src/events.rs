@@ -86,6 +86,14 @@ pub enum UiCommand {
         inputs: Vec<MethodArgValue>,
         req_id: u64,
     },
+    ReadHistory {
+        conn_id: String,
+        node_id: String,
+        start_iso: String,
+        end_iso: String,
+        max_values: u32,
+        req_id: u64,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -149,6 +157,15 @@ pub struct MethodArgValue {
     pub value: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HistoryPointDto {
+    pub source_timestamp: String,
+    pub server_timestamp: String,
+    pub value: String,
+    pub numeric: Option<f64>,
+    pub status: String,
+}
+
 #[derive(Debug, Clone)]
 pub enum BackendEvent {
     Connections(Vec<ConnectionInfo>),
@@ -201,6 +218,12 @@ pub enum BackendEvent {
         req_id: u64,
         status: String,
         outputs: Vec<MethodArgValue>,
+    },
+    HistoryResult {
+        req_id: u64,
+        node_id: String,
+        points: Vec<HistoryPointDto>,
+        error: Option<String>,
     },
     Toast {
         level: ToastLevel,

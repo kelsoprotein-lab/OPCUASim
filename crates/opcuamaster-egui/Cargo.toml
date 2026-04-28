@@ -16,6 +16,7 @@ async-opcua-types = "0.18"
 eframe.workspace = true
 egui.workspace = true
 egui_extras.workspace = true
+egui_plot.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
 rfd.workspace = true

@@ -12,6 +12,7 @@ use opcuasim_core::cert_manager::{
 };
 use opcuasim_core::client::{ConnectionState, OpcUaConnection};
 use opcuasim_core::discovery::discover_endpoints;
+use opcuasim_core::history::history_read_raw;
 use opcuasim_core::method::{call_method, read_method_arguments};
 use opcuasim_core::config::{AuthConfig, ConnectionConfig, ConnectionProjectEntry, ProjectFile};
 use opcuasim_core::node::{
@@ -24,8 +25,8 @@ use crate::backend::state::{BackendState, ConnectionEntry};
 use crate::events::{
     AuthKindReq, BackendEvent, BrowseItem, CertRoleDto, CertSummaryDto, ConnectionInfo,
     CreateConnectionReq, DataChangeFilterReq, DataChangeTriggerKindReq, DeadbandKindReq,
-    DiscoveredEndpointDto, LogRow, MethodArgInfo, MethodArgValue, MonitoredNodeReq, MonitoredRow,
-    NodeAttrsDto, NodeGroupDto, ToastLevel, UiCommand,
+    DiscoveredEndpointDto, HistoryPointDto, LogRow, MethodArgInfo, MethodArgValue,
+    MonitoredNodeReq, MonitoredRow, NodeAttrsDto, NodeGroupDto, ToastLevel, UiCommand,
 };
 
 pub async fn run(
@@ -227,6 +228,19 @@ async fn handle_cmd(
         } => {
             do_call_method(
                 conn_id, object_id, method_id, inputs, req_id, &state, &event_tx,
+            )
+            .await
+        }
+        UiCommand::ReadHistory {
+            conn_id,
+            node_id,
+            start_iso,
+            end_iso,
+            max_values,
+            req_id,
+        } => {
+            do_read_history(
+                conn_id, node_id, start_iso, end_iso, max_values, req_id, &state, &event_tx,
             )
             .await
         }
@@ -1171,4 +1185,62 @@ fn variant_type_label(v: &opcua_types::Variant) -> String {
         VariantTypeId::Scalar(s) => format!("{s}"),
         VariantTypeId::Array(s, _) => format!("Array<{s}>"),
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn do_read_history(
+    conn_id: String,
+    node_id: String,
+    start_iso: String,
+    end_iso: String,
+    max_values: u32,
+    req_id: u64,
+    state: &Arc<BackendState>,
+    event_tx: &UnboundedSender<BackendEvent>,
+) -> Result<(), String> {
+    let session = get_session(state, &conn_id).await?;
+    let nid: opcua_types::NodeId = node_id
+        .parse()
+        .map_err(|_| format!("invalid node id: {node_id}"))?;
+    let start = parse_iso_to_datetime(&start_iso)?;
+    let end = parse_iso_to_datetime(&end_iso)?;
+
+    match history_read_raw(&session, &nid, start, end, max_values, true).await {
+        Ok(pts) => {
+            let dtos: Vec<HistoryPointDto> = pts
+                .into_iter()
+                .map(|p| HistoryPointDto {
+                    source_timestamp: p.source_timestamp,
+                    server_timestamp: p.server_timestamp,
+                    value: p.value,
+                    numeric: p.numeric,
+                    status: p.status,
+                })
+                .collect();
+            let _ = event_tx.send(BackendEvent::HistoryResult {
+                req_id,
+                node_id: node_id.clone(),
+                points: dtos,
+                error: None,
+            });
+            Ok(())
+        }
+        Err(e) => {
+            let msg = e.to_string();
+            let _ = event_tx.send(BackendEvent::HistoryResult {
+                req_id,
+                node_id: node_id.clone(),
+                points: Vec::new(),
+                error: Some(msg.clone()),
+            });
+            Err(format!("HistoryRead failed: {msg}"))
+        }
+    }
+}
+
+fn parse_iso_to_datetime(s: &str) -> Result<opcua_types::DateTime, String> {
+    let parsed = chrono::DateTime::parse_from_rfc3339(s.trim())
+        .map_err(|e| format!("invalid time '{s}': {e}"))?;
+    let utc: chrono::DateTime<chrono::Utc> = parsed.with_timezone(&chrono::Utc);
+    Ok(opcua_types::DateTime::from(utc))
 }
