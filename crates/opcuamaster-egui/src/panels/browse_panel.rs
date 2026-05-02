@@ -122,11 +122,16 @@ fn render_tree(
         .show(ui, |ui| {
             if !model.browse.root_loaded {
                 if model.browse.pending.is_empty() {
-                    ui.label("(无数据)");
+                    opcuaegui_shared::widgets::empty_state(
+                        ui,
+                        "🌲",
+                        "无可用根节点",
+                        Some("请确认服务端已运行并暴露地址空间"),
+                    );
                 } else {
                     ui.horizontal(|ui| {
                         ui.spinner();
-                        ui.label("加载根节点...");
+                        ui.label("加载根节点…");
                     });
                 }
                 return;

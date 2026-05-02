@@ -1,5 +1,6 @@
 use chrono::{DateTime, Local, TimeZone};
 use egui_extras::{Column, TableBuilder};
+use opcuaegui_shared::theme;
 
 use crate::events::UiCommand;
 use crate::model::{AppModel, LogDirectionFilter, LogPerConn};
@@ -8,7 +9,10 @@ use crate::runtime::BackendHandle;
 pub fn show(ui: &mut egui::Ui, model: &mut AppModel, backend: &BackendHandle) {
     let Some(conn_id) = model.selected_conn.clone() else {
         ui.horizontal(|ui| {
-            ui.label("通信日志 (未选择连接)");
+            ui.label(
+                egui::RichText::new("通信日志 (未选择连接)")
+                    .color(theme::TEXT_MUTED),
+            );
         });
         return;
     };
@@ -123,15 +127,21 @@ pub fn show(ui: &mut egui::Ui, model: &mut AppModel, backend: &BackendHandle) {
                 };
                 let ts = format_local_ts(entry.timestamp_ms);
                 let dir_color = match entry.direction.as_str() {
-                    "Request" => egui::Color32::from_rgb(120, 200, 120),
-                    "Response" => egui::Color32::from_rgb(120, 180, 220),
-                    _ => egui::Color32::GRAY,
+                    "Request" => theme::STATUS_OK,
+                    "Response" => theme::STATUS_INFO,
+                    _ => theme::STATUS_IDLE,
                 };
                 row.col(|ui| {
-                    ui.monospace(ts);
+                    ui.label(
+                        egui::RichText::new(ts)
+                            .monospace()
+                            .small()
+                            .color(theme::TEXT_MUTED),
+                    );
                 });
                 row.col(|ui| {
-                    ui.colored_label(dir_color, &entry.direction);
+                    let glyph = if entry.direction == "Request" { "→" } else { "←" };
+                    ui.colored_label(dir_color, format!("{glyph} {}", entry.direction));
                 });
                 row.col(|ui| {
                     ui.label(&entry.service);

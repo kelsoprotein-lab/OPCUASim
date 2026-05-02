@@ -6,66 +6,142 @@ on:
       - 'v*'
 
 jobs:
-  release:
+  build:
     permissions:
-      contents: write
+      contents: read
     strategy:
       fail-fast: false
       matrix:
         include:
           - platform: macos-latest
-            args: '--target aarch64-apple-darwin'
+            target: aarch64-apple-darwin
+            suffix: macos-aarch64
           - platform: macos-latest
-            args: '--target x86_64-apple-darwin'
+            target: x86_64-apple-darwin
+            suffix: macos-x86_64
           - platform: ubuntu-22.04
-            args: ''
+            target: x86_64-unknown-linux-gnu
+            suffix: linux-x86_64
           - platform: windows-latest
-            args: ''
+            target: x86_64-pc-windows-msvc
+            suffix: windows-x86_64
     runs-on: ${{ matrix.platform }}
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+          targets: ${{ matrix.target }}
 
       - name: Install Linux dependencies
         if: matrix.platform == 'ubuntu-22.04'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+          sudo apt-get install -y \
+            libxkbcommon-dev libwayland-dev libxcb1-dev libxcb-render0-dev \
+            libxcb-shape0-dev libxcb-xfixes0-dev libgl1-mesa-dev libfontconfig1-dev
 
-      - name: Install frontend dependencies
+      - name: Build OPCUAMaster
+        run: cargo build --release --target ${{ matrix.target }} -p opcuamaster-egui
+
+      - name: Build OPCUAServer
+        run: cargo build --release --target ${{ matrix.target }} -p opcuaserver-egui
+
+      - name: Stage artifacts (Unix)
+        if: matrix.platform != 'windows-latest'
         shell: bash
         run: |
-          rm -f package-lock.json
-          npm install
+          mkdir -p dist
+          cp target/${{ matrix.target }}/release/OPCUAMaster dist/OPCUAMaster-${{ matrix.suffix }}
+          cp target/${{ matrix.target }}/release/OPCUAServer dist/OPCUAServer-${{ matrix.suffix }}
 
-      - name: Build master frontend
-        working-directory: master-frontend
-        run: npm run build
+      - name: Stage artifacts (Windows)
+        if: matrix.platform == 'windows-latest'
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp target/${{ matrix.target }}/release/OPCUAMaster.exe dist/OPCUAMaster-${{ matrix.suffix }}.exe
+          cp target/${{ matrix.target }}/release/OPCUAServer.exe dist/OPCUAServer-${{ matrix.suffix }}.exe
 
-      - name: Build and release OPCUAMaster
-        uses: tauri-apps/tauri-action@v0
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: opcuasim-${{ matrix.suffix }}
+          path: dist/*
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Flatten artifacts
+        shell: bash
+        run: |
+          mkdir -p dist
+          find artifacts -type f -exec cp {} dist/ \;
+          ls -la dist/
+
+      - name: Render release body from CHANGELOG
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          VER="${TAG#v}"
+          REPO="${GITHUB_REPOSITORY}"
+
+          # Extract the section for this version from CHANGELOG.md.
+          awk -v ver="## [$VER]" '
+            BEGIN { found=0 }
+            index($0, ver) == 1 { found=1; next }
+            found && /^## \[/ { exit }
+            found { print }
+          ' CHANGELOG.md > section.md
+
+          if [ ! -s section.md ]; then
+            echo "::warning::No CHANGELOG section found for $TAG; falling back to placeholder."
+            echo "_No changelog entry for $TAG._" > section.md
+          fi
+
+          {
+            echo "## OPCUASim ${TAG}"
+            echo
+            echo "### Downloads"
+            echo
+            echo "| Platform | OPCUAMaster | OPCUAServer |"
+            echo "|----------|-------------|-------------|"
+            base="https://github.com/${REPO}/releases/download/${TAG}"
+            echo "| macOS (Apple Silicon) | [OPCUAMaster-macos-aarch64](${base}/OPCUAMaster-macos-aarch64) | [OPCUAServer-macos-aarch64](${base}/OPCUAServer-macos-aarch64) |"
+            echo "| macOS (Intel) | [OPCUAMaster-macos-x86_64](${base}/OPCUAMaster-macos-x86_64) | [OPCUAServer-macos-x86_64](${base}/OPCUAServer-macos-x86_64) |"
+            echo "| Linux (x86_64) | [OPCUAMaster-linux-x86_64](${base}/OPCUAMaster-linux-x86_64) | [OPCUAServer-linux-x86_64](${base}/OPCUAServer-linux-x86_64) |"
+            echo "| Windows (x86_64) | [OPCUAMaster-windows-x86_64.exe](${base}/OPCUAMaster-windows-x86_64.exe) | [OPCUAServer-windows-x86_64.exe](${base}/OPCUAServer-windows-x86_64.exe) |"
+            echo
+            cat section.md
+            echo
+            echo "---"
+            echo "Full changelog: [CHANGELOG.md](https://github.com/${REPO}/blob/${TAG}/CHANGELOG.md)"
+          } > RELEASE_BODY.md
+
+          echo "----- Rendered release body -----"
+          cat RELEASE_BODY.md
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: OPCUASim ${{ github.ref_name }}
+          body_path: RELEASE_BODY.md
+          draft: false
+          prerelease: false
+          files: dist/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          projectPath: crates/opcuamaster-app
-          tagName: ${{ github.ref_name }}
-          releaseName: 'OPCUASim ${{ github.ref_name }}'
-          releaseBody: |
-            ## Downloads
-
-            **OPCUAMaster** - OPC UA Master Station (Client)
-
-            See the assets below to download for your platform.
-          releaseDraft: false
-          prerelease: false
-          args: ${{ matrix.args }}

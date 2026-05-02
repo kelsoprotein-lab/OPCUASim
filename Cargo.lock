@@ -2721,7 +2721,7 @@ checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 
 [[package]]
 name = "opcuaegui-shared"
-version = "0.2.0"
+version = "0.4.0"
 dependencies = [
  "egui",
  "log",
@@ -2733,7 +2733,7 @@ dependencies = [
 
 [[package]]
 name = "opcuamaster-egui"
-version = "0.2.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "async-opcua-types",
@@ -2758,7 +2758,7 @@ dependencies = [
 
 [[package]]
 name = "opcuaserver-egui"
-version = "0.2.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2780,7 +2780,7 @@ dependencies = [
 
 [[package]]
 name = "opcuasim-core"
-version = "0.2.0"
+version = "0.4.0"
 dependencies = [
  "async-opcua-client",
  "async-opcua-crypto",

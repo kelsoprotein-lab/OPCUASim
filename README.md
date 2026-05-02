@@ -1,106 +1,56 @@
 # OPCUASim
 
-Cross-platform OPC UA simulation suite — currently includes **OPCUAMaster** (master station / client), built with Tauri 2, Rust, and Vue 3. Connects to any OPC UA server, browses the address space, and monitors data in real-time.
+Cross-platform OPC UA simulation suite — pure Rust desktop apps built with [egui](https://www.egui.rs/) and the [`async-opcua`](https://crates.io/crates/async-opcua) stack.
+
+| Binary | Role |
+|--------|------|
+| **OPCUAMaster** | Master station / client — connect, browse, monitor, history, methods |
+| **OPCUAServer** | Address-space simulator — folders, variables with simulation modes, optional writable nodes |
 
 [中文文档](README_CN.md)
 
-## Download
-
-**[Latest Release](https://github.com/kelsoprotein-lab/OPCUASim/releases/latest)**
-
-| Platform | OPCUAMaster |
-|----------|------------|
-| macOS (Apple Silicon) | [.dmg](https://github.com/kelsoprotein-lab/OPCUASim/releases/latest/download/OPCUAMaster_0.2.0_aarch64.dmg) |
-| macOS (Intel) | [.dmg](https://github.com/kelsoprotein-lab/OPCUASim/releases/latest/download/OPCUAMaster_0.2.0_x64.dmg) |
-| Windows | [.exe](https://github.com/kelsoprotein-lab/OPCUASim/releases/latest/download/OPCUAMaster_0.2.0_x64-setup.exe) / [.msi](https://github.com/kelsoprotein-lab/OPCUASim/releases/latest/download/OPCUAMaster_0.2.0_x64_en-US.msi) |
-| Linux | [.deb](https://github.com/kelsoprotein-lab/OPCUASim/releases/latest/download/OPCUAMaster_0.2.0_amd64.deb) / [.AppImage](https://github.com/kelsoprotein-lab/OPCUASim/releases/latest/download/OPCUAMaster_0.2.0_amd64.AppImage) / [.rpm](https://github.com/kelsoprotein-lab/OPCUASim/releases/latest/download/OPCUAMaster-0.2.0-1.x86_64.rpm) |
-
 ## Features
 
-### OPCUAMaster — Master Station (Client)
+### OPCUAMaster — Client / Master Station
 
-- **OPC UA DA (Data Access)** — Connect to any OPC UA server, browse address space, read/write variable values
-- **Security Support** — None, Sign, SignAndEncrypt modes; Anonymous, Username/Password, and Certificate authentication
-- **Address Space Browser** — Infinite-depth lazy-loading tree, expand folders to discover Variable nodes
-- **Smart Node Collection** — Select an Object node to automatically collect all Variable children underneath
-- **Subscription + Polling** — Monitor nodes via OPC UA subscription (server push) or configurable polling interval
-- **Real-time Data Table** — Virtual-scrolled table with search/filter, short NodeId display, flex-responsive columns
-- **Value Panel** — View selected node attributes (NodeId, DisplayName, DataType, Value, Quality, Timestamp)
-- **Communication Log** — Real-time request/response logging with direction filter, service filter, search, and CSV export
-- **Project Files** — Save/load connection configurations as `.opcuaproj` files
-- **Custom Groups** — Organize monitored nodes into named groups
-- **Auto-Reconnect** — Exponential backoff reconnection (1s → 2s → 4s → ... → 60s max)
-- **Robust Decoding** — Handles large address spaces (65535 array elements, 128MB messages)
+- **OPC UA DA** — connect to any OPC UA server, browse address space, read/write values
+- **Security** — None / Sign / SignAndEncrypt; Anonymous, Username/Password, Certificate auth
+- **Endpoint discovery** — query a server URL to enumerate available endpoints and their security profiles
+- **Lazy-loading address browser** — infinite-depth tree, expand on demand
+- **Smart variable collection** — pick an Object node to add all Variable descendants in one click
+- **Subscription + Polling** — server push or client pull at a configurable interval, per-node `DataChangeFilter`
+- **Real-time table** — searchable, multi-select with `Ctrl/Cmd+Click`, quality colour coding
+- **Value & Write panel** — node attributes, manual read, value write back to writable nodes
+- **History (HA)** — read raw history into a plot + table tab, quick ranges (1m … 24h)
+- **Method calls** — auto-discover input/output arguments and invoke methods from the browser
+- **Communication log** — bottom panel with direction filter, search, CSV export
+- **Project files** — save/load all connections + groups as `.opcuaproj`
+- **Certificate manager** — list, trust/reject, delete certificates in the local PKI
 
-## Usage
+### OPCUAServer — Address-Space Simulator
 
-### Quick Start
-
-1. Launch OPCUAMaster and click **New Connection** in the toolbar
-2. Enter a connection name (e.g. "Local Server") and the OPC UA endpoint URL (e.g. `opc.tcp://localhost:4840`)
-3. Select the connection in the left panel, then click **Connect**
-4. Once connected, click **Browse Nodes** to open the address space browser
-
-### Browsing Address Space
-
-- The **Browse Panel** displays the server's address space as a lazy-loading tree
-- Click any folder node to expand and discover child nodes
-- Select a **Variable** node to add it to the monitoring data table
-- Select an **Object** node to automatically collect all Variable children underneath (smart collection)
-- Node attributes (NodeId, DisplayName, DataType, etc.) are shown when you select a node
-
-### Monitoring Data
-
-- Monitored nodes appear in the central **Data Table** with real-time value updates
-- Two access modes are available:
-  - **Subscription** (default) — server pushes data changes to the client
-  - **Polling** — client reads values at a configurable interval
-- The data table supports search/filter, virtual scrolling for large node sets, and flex-responsive columns
-- Select a row to view detailed attributes in the right **Value Panel** (NodeId, DisplayName, DataType, Value, Quality, Timestamp)
-- Right-click or use toolbar buttons to remove nodes from monitoring
-
-### Communication Log
-
-- The bottom **Log Panel** records all OPC UA request/response messages in real-time
-- Click the log bar to expand/collapse the panel
-- Filter logs by direction (Request/Response), service type, or free-text search
-- Click **Export Logs** in the toolbar to download logs as a CSV file
-- Use **Clear** to reset the log buffer
-
-### Project Files
-
-- Click **Save** in the toolbar to save all connection configurations to a `.opcuaproj` file
-- Click **Open** to load a previously saved project, restoring all connections and groups
-- Project files store: connection name, endpoint URL, security settings, authentication config, and monitored node groups
-
-### Architecture
-
-- **Pure Rust Backend** — `opcuasim-core` library with `async-opcua` client, fully async with Tokio
-- **Tauri 2 Desktop** — Native desktop app via WebView, cross-platform (macOS, Windows, Linux)
-- **Vue 3 + TypeScript** — Reactive UI with Composition API, virtual scrolling via @tanstack/vue-virtual
-- **Catppuccin Mocha Theme** — Dark theme consistent with [ModbusSim](https://github.com/kelsoprotein-lab/ModbusSim) and [IEC104 Simulator](https://github.com/kelsoprotein-lab/IEC60870-5-104-Simulator)
-- **Pluggable Output** — `DataOutput` trait for future integration (MQTT, InfluxDB, REST API)
+- **Embedded OPC UA server** — defaults to `opc.tcp://0.0.0.0:4840`
+- **Folder + Variable tree** — add folders and variables under `Objects`
+- **Simulation modes** — `Static`, `Random`, `Sine`, `Linear` (Repeat/Bounce), `Script` (`evalexpr`)
+- **Live values** — variable values update at their per-node interval and stream to the UI
+- **Writable nodes** — toggle `RW` to let clients write through
+- **Project files** — save/load the entire address space as `.opcuaproj`
 
 ## Development
 
 ### Prerequisites
 
 - Rust 1.77+
-- Node.js 18+
-- npm
+- A CJK font on your system (PingFang on macOS, Microsoft YaHei on Windows, Noto Sans CJK on Linux) for Chinese labels — auto-detected at startup
 
 ### Build & Run
 
 ```bash
-# Install frontend dependencies
-npm install
+# Master station
+cargo run -p opcuamaster-egui --release
 
-# Run in development mode
-cd crates/opcuamaster-app
-cargo tauri dev
-
-# Build for production
-cargo tauri build
+# Server simulator
+cargo run -p opcuaserver-egui --release
 ```
 
 ### Project Structure
@@ -108,53 +58,24 @@ cargo tauri build
 ```
 OPCUASim/
 ├── crates/
-│   ├── opcuasim-core/          # Core OPC UA library
-│   │   └── src/
-│   │       ├── client.rs       # Connection management
-│   │       ├── browse.rs       # Node browsing + variable collection
-│   │       ├── subscription.rs # OPC UA subscription manager
-│   │       ├── polling.rs      # Polling manager
-│   │       ├── config.rs       # Configuration + project files
-│   │       └── ...
-│   └── opcuamaster-app/        # Tauri desktop app
-│       └── src/
-│           ├── commands.rs     # 22 Tauri IPC commands
-│           └── state.rs        # App state + DTOs
-├── master-frontend/            # Vue 3 frontend
-│   └── src/
-│       ├── App.vue             # Grid layout
-│       └── components/         # Toolbar, Tree, DataTable, etc.
-└── shared-frontend/            # Shared composables + components
+│   ├── opcuasim-core/          # Core library: client, server, browse, subscription, polling, history, methods
+│   ├── opcuaegui-shared/       # Shared egui pieces: theme, widgets, fonts, tokio runtime handle, settings
+│   ├── opcuamaster-egui/       # OPCUAMaster desktop app
+│   └── opcuaserver-egui/       # OPCUAServer desktop app
+├── pki/                        # Local PKI (trusted/rejected/own)
+└── docs/                       # Design notes & implementation plans
 ```
 
 ## Contributing
 
-Contributions are welcome! Please follow these steps:
+1. Fork and create a feature branch from `master`
+2. `cargo fmt` and `cargo clippy --workspace -- -D warnings` before committing
+3. Conventional commit prefixes: `feat:`, `fix:`, `refactor:`, `docs:`, `chore:`
+4. Open a PR against `master`
 
-1. Fork the repository
-2. Create a feature branch from `master` (`git checkout -b feat/your-feature`)
-3. Make your changes
-4. Ensure the code compiles and passes checks:
-   ```bash
-   cargo clippy --workspace -- -D warnings
-   cd master-frontend && npx vue-tsc --noEmit
-   ```
-5. Commit with a descriptive message following [Conventional Commits](https://www.conventionalcommits.org/) (e.g. `feat:`, `fix:`, `refactor:`)
-6. Push to your fork and open a Pull Request
+## Changelog
 
-### Code Style
-
-- **Rust** — Follow standard Rust conventions. Run `cargo fmt` and `cargo clippy` before committing. Zero warnings policy.
-- **TypeScript/Vue** — Use Composition API with `<script setup>`. Keep components focused and single-purpose.
-- **Commits** — Use conventional commit prefixes: `feat:`, `fix:`, `refactor:`, `docs:`, `chore:`, etc.
-
-### Reporting Issues
-
-Please open a [GitHub Issue](https://github.com/kelsoprotein-lab/OPCUASim/issues) with:
-- OS and version
-- Steps to reproduce
-- Expected vs actual behavior
-- OPC UA server info (if relevant)
+See [CHANGELOG.md](CHANGELOG.md) and the [Releases](https://github.com/kelsoprotein-lab/OPCUASim/releases) page.
 
 ## License
 

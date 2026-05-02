@@ -15,6 +15,7 @@ pub struct ServerApp {
 impl ServerApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         opcuaegui_shared::fonts::install_cjk_fonts(&cc.egui_ctx);
+        opcuaegui_shared::theme::apply(&cc.egui_ctx);
         let (backend, event_rx) = BackendHandle::new(
             cc.egui_ctx.clone(),
             "opcua-server-backend",
@@ -96,17 +97,20 @@ impl ServerApp {
         egui::Area::new("toasts".into())
             .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-16.0, -40.0))
             .show(ctx, |ui| {
-                for t in &self.model.toasts {
-                    let color = match t.level {
-                        crate::events::ToastLevel::Info => egui::Color32::LIGHT_BLUE,
-                        crate::events::ToastLevel::Error => egui::Color32::LIGHT_RED,
-                    };
-                    egui::Frame::popup(ui.style())
-                        .fill(egui::Color32::from_black_alpha(230))
-                        .show(ui, |ui| {
-                            ui.colored_label(color, &t.message);
-                        });
-                }
+                ui.vertical(|ui| {
+                    for t in &self.model.toasts {
+                        let color = match t.level {
+                            crate::events::ToastLevel::Info => {
+                                opcuaegui_shared::theme::STATUS_INFO
+                            }
+                            crate::events::ToastLevel::Error => {
+                                opcuaegui_shared::theme::STATUS_BAD
+                            }
+                        };
+                        opcuaegui_shared::widgets::toast_card(ui, color, &t.message);
+                        ui.add_space(4.0);
+                    }
+                });
             });
     }
 }
@@ -150,7 +154,7 @@ impl eframe::App for ServerApp {
             });
 
         egui::CentralPanel::default().show_inside(ui, |ui| {
-            node_table::show(ui, &mut self.model);
+            node_table::show(ui, &mut self.model, &self.backend);
         });
 
         self.render_toasts(ui.ctx());

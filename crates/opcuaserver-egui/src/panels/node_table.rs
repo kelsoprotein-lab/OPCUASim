@@ -1,22 +1,66 @@
 use egui_extras::{Column, TableBuilder};
+use opcuaegui_shared::theme;
+use opcuaegui_shared::widgets::empty_state;
 
 use opcuasim_core::server::models::SimulationMode;
 
+use crate::events::UiCommand;
 use crate::model::AppModel;
+use crate::runtime::BackendHandle;
 
-pub fn show(ui: &mut egui::Ui, model: &mut AppModel) {
-    ui.heading("节点列表");
+pub fn show(ui: &mut egui::Ui, model: &mut AppModel, backend: &BackendHandle) {
+    ui.horizontal(|ui| {
+        ui.label(
+            egui::RichText::new("节点列表")
+                .strong()
+                .color(theme::TEXT_PRIMARY),
+        );
+        let count = model.address_space.nodes.len();
+        ui.label(
+            egui::RichText::new(format!("· {count} 个变量"))
+                .small()
+                .color(theme::TEXT_MUTED),
+        );
+        let multi = model.selected_node_ids.len();
+        if multi > 1 {
+            ui.separator();
+            ui.label(
+                egui::RichText::new(format!("已选 {multi}"))
+                    .small()
+                    .color(theme::ACCENT),
+            );
+            if ui.button("🗑 移除选中").clicked() {
+                let ids: Vec<String> = model.selected_node_ids.iter().cloned().collect();
+                for id in &ids {
+                    backend.send(UiCommand::RemoveNode(id.clone()));
+                }
+                model.selected_node_ids.clear();
+                if let Some(sel) = &model.selected_node_id {
+                    if ids.contains(sel) {
+                        model.selected_node_id = None;
+                    }
+                }
+            }
+        }
+    });
     ui.separator();
 
     let nodes = model.address_space.nodes.clone();
     let total = nodes.len();
     if total == 0 {
-        ui.label("(无变量节点。使用顶部表单添加。)");
+        empty_state(
+            ui,
+            "📊",
+            "尚未定义变量",
+            Some("使用顶部 📊 新建节点 添加一个 Variable"),
+        );
         return;
     }
 
     let ctx_modifiers = ui.ctx().input(|i| i.modifiers);
-    let _ctrl = ctx_modifiers.ctrl || ctx_modifiers.command;
+    let ctrl = ctx_modifiers.ctrl || ctx_modifiers.command;
+
+    let mut delete_request: Option<String> = None;
 
     let mut table = TableBuilder::new(ui)
         .striped(true)
@@ -42,14 +86,21 @@ pub fn show(ui: &mut egui::Ui, model: &mut AppModel) {
                 let Some(n) = nodes.get(row.index()) else {
                     return;
                 };
-                let selected = model.selected_node_id.as_deref() == Some(&n.node_id);
-                row.set_selected(selected);
+                let multi_selected = model.selected_node_ids.contains(&n.node_id);
+                let single_selected =
+                    model.selected_node_id.as_deref() == Some(&n.node_id);
+                row.set_selected(multi_selected || single_selected);
 
                 row.col(|ui| {
                     ui.label(&n.display_name);
                 });
                 row.col(|ui| {
-                    ui.monospace(&n.node_id);
+                    ui.label(
+                        egui::RichText::new(&n.node_id)
+                            .monospace()
+                            .small()
+                            .color(theme::TEXT_MUTED),
+                    );
                 });
                 row.col(|ui| {
                     ui.label(n.data_type.to_string());
@@ -67,13 +118,44 @@ pub fn show(ui: &mut egui::Ui, model: &mut AppModel) {
                     ui.monospace(v);
                 });
                 row.col(|ui| {
-                    ui.label(if n.writable { "RW" } else { "R" });
+                    let (lbl, color) = if n.writable {
+                        ("RW", theme::ACCENT)
+                    } else {
+                        ("R", theme::TEXT_MUTED)
+                    };
+                    ui.colored_label(color, lbl);
                 });
-                if row.response().clicked() {
+
+                let resp = row.response();
+                if resp.clicked() {
+                    if ctrl {
+                        if multi_selected {
+                            model.selected_node_ids.remove(&n.node_id);
+                        } else {
+                            model.selected_node_ids.insert(n.node_id.clone());
+                        }
+                    } else {
+                        model.selected_node_ids.clear();
+                    }
                     model.selected_node_id = Some(n.node_id.clone());
                 }
+                let nid = n.node_id.clone();
+                resp.context_menu(|ui| {
+                    if ui.button("🗑 删除节点").clicked() {
+                        delete_request = Some(nid.clone());
+                        ui.close();
+                    }
+                });
             });
         });
+
+    if let Some(id) = delete_request {
+        backend.send(UiCommand::RemoveNode(id.clone()));
+        model.selected_node_ids.remove(&id);
+        if model.selected_node_id.as_deref() == Some(&id) {
+            model.selected_node_id = None;
+        }
+    }
 }
 
 fn sim_label(s: &SimulationMode) -> &'static str {

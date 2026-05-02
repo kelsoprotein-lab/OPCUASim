@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use opcuasim_core::server::models::{DataType, ServerConfig, SimulationMode};
 
@@ -9,10 +9,14 @@ pub struct AppModel {
     pub address_space: AddressSpaceDto,
     pub config: ServerConfig,
     pub selected_node_id: Option<String>,
+    /// Multi-selection set populated via Ctrl/Cmd+Click in the node table.
+    pub selected_node_ids: HashSet<String>,
     pub current_values: HashMap<String, String>, // node_id -> latest value
     pub last_sim_seq: u64,
     pub add_node_form: AddNodeForm,
     pub new_folder_name: String,
+    /// Per-parent text-input buffers used by the "新建子文件夹" right-click menu.
+    pub subfolder_inputs: HashMap<String, String>,
     pub toasts: Vec<Toast>,
 }
 
@@ -28,10 +32,12 @@ impl Default for AppModel {
             address_space: AddressSpaceDto::default(),
             config: ServerConfig::default(),
             selected_node_id: None,
+            selected_node_ids: HashSet::new(),
             current_values: HashMap::new(),
             last_sim_seq: 0,
             add_node_form: AddNodeForm::default(),
             new_folder_name: String::new(),
+            subfolder_inputs: HashMap::new(),
             toasts: Vec::new(),
         }
     }

@@ -1,4 +1,6 @@
 use opcuasim_core::server::models::DataType;
+use opcuaegui_shared::theme;
+use opcuaegui_shared::widgets::status_chip;
 
 use crate::events::{AddNodeReq, UiCommand};
 use crate::model::{AppModel, SimKind};
@@ -6,10 +8,25 @@ use crate::runtime::BackendHandle;
 
 pub fn show(ui: &mut egui::Ui, model: &mut AppModel, backend: &BackendHandle) {
     ui.horizontal(|ui| {
-        ui.heading("OPCUAServer");
-        ui.separator();
+        ui.label(
+            egui::RichText::new("OPCUAServer")
+                .strong()
+                .size(15.0)
+                .color(theme::ACCENT),
+        );
         let running = model.status.state == "Running";
         let starting = model.status.state == "Starting";
+        let (icon, color, label) = match model.status.state.as_str() {
+            "Running" => ("●", theme::STATUS_OK, "运行中"),
+            "Starting" => ("◐", theme::STATUS_WARN, "启动中"),
+            "Stopping" => ("◑", theme::STATUS_WARN, "停止中"),
+            "Stopped" => ("○", theme::STATUS_BAD, "已停止"),
+            other => ("·", theme::STATUS_IDLE, other),
+        };
+        status_chip(ui, color, icon, label);
+
+        ui.separator();
+
         ui.add_enabled_ui(!running && !starting, |ui| {
             if ui.button("▶ 启动").clicked() {
                 backend.send(UiCommand::StartServer);
@@ -20,13 +37,55 @@ pub fn show(ui: &mut egui::Ui, model: &mut AppModel, backend: &BackendHandle) {
                 backend.send(UiCommand::StopServer);
             }
         });
+
         ui.separator();
-        ui.label("Endpoint:");
+        ui.label(
+            egui::RichText::new("Endpoint")
+                .small()
+                .color(theme::TEXT_MUTED),
+        );
         ui.monospace(&model.status.endpoint_url);
+
+        ui.with_layout(
+            egui::Layout::right_to_left(egui::Align::Center),
+            |ui| {
+                if ui
+                    .button("📂 打开")
+                    .on_hover_text("Cmd/Ctrl+O")
+                    .clicked()
+                {
+                    if let Some(path) = rfd::FileDialog::new()
+                        .add_filter("OPCUA Server Project", &["opcuaproj", "json"])
+                        .pick_file()
+                    {
+                        backend.send(UiCommand::LoadProject(path));
+                    }
+                }
+                if ui
+                    .button("💾 保存")
+                    .on_hover_text("Cmd/Ctrl+S")
+                    .clicked()
+                {
+                    if let Some(path) = rfd::FileDialog::new()
+                        .set_file_name("server.opcuaproj")
+                        .add_filter("OPCUA Server Project", &["opcuaproj", "json"])
+                        .save_file()
+                    {
+                        backend.send(UiCommand::SaveProject(path));
+                    }
+                }
+            },
+        );
     });
+
     ui.add_space(4.0);
+
     ui.horizontal(|ui| {
-        ui.label("➕ 新建文件夹:");
+        ui.label(
+            egui::RichText::new("📁 新建文件夹")
+                .small()
+                .color(theme::TEXT_MUTED),
+        );
         ui.add(
             egui::TextEdit::singleline(&mut model.new_folder_name)
                 .hint_text("display name")
@@ -45,27 +104,15 @@ pub fn show(ui: &mut egui::Ui, model: &mut AppModel, backend: &BackendHandle) {
                 model.new_folder_name.clear();
             }
         });
+
         ui.separator();
-        ui.label("📄 新建节点:");
+
+        ui.label(
+            egui::RichText::new("📊 新建节点")
+                .small()
+                .color(theme::TEXT_MUTED),
+        );
         add_node_form(ui, model, backend);
-        ui.separator();
-        if ui.button("💾 保存").clicked() {
-            if let Some(path) = rfd::FileDialog::new()
-                .set_file_name("server.opcuaproj")
-                .add_filter("OPCUA Server Project", &["opcuaproj", "json"])
-                .save_file()
-            {
-                backend.send(UiCommand::SaveProject(path));
-            }
-        }
-        if ui.button("📂 打开").clicked() {
-            if let Some(path) = rfd::FileDialog::new()
-                .add_filter("OPCUA Server Project", &["opcuaproj", "json"])
-                .pick_file()
-            {
-                backend.send(UiCommand::LoadProject(path));
-            }
-        }
     });
 }
 
@@ -99,11 +146,18 @@ fn add_node_form(ui: &mut egui::Ui, model: &mut AppModel, backend: &BackendHandl
         .selected_text(sim_label(form.sim_kind))
         .width(90.0)
         .show_ui(ui, |ui| {
-            for k in [SimKind::Static, SimKind::Random, SimKind::Sine, SimKind::Linear, SimKind::Script] {
+            for k in [
+                SimKind::Static,
+                SimKind::Random,
+                SimKind::Sine,
+                SimKind::Linear,
+                SimKind::Script,
+            ] {
                 ui.selectable_value(&mut form.sim_kind, k, sim_label(k));
             }
         });
-    ui.checkbox(&mut form.writable, "W");
+    ui.checkbox(&mut form.writable, "RW")
+        .on_hover_text("是否允许客户端写入");
     let enabled = !form.display_name.trim().is_empty();
     ui.add_enabled_ui(enabled, |ui| {
         if ui.button("添加").clicked() {

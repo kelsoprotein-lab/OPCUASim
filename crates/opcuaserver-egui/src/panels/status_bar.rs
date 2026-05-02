@@ -1,21 +1,48 @@
+use opcuaegui_shared::theme;
+use opcuaegui_shared::widgets::status_chip;
+
 use crate::model::AppModel;
 
 pub fn show(ui: &mut egui::Ui, model: &AppModel) {
     ui.horizontal(|ui| {
-        let (icon, color) = match model.status.state.as_str() {
-            "Running" => ("●", egui::Color32::from_rgb(80, 200, 120)),
-            "Starting" => ("◐", egui::Color32::from_rgb(240, 200, 80)),
-            "Stopping" => ("◑", egui::Color32::from_rgb(240, 160, 80)),
-            "Stopped" => ("○", egui::Color32::from_rgb(180, 80, 80)),
-            _ => ("·", egui::Color32::GRAY),
+        let (icon, color, label) = match model.status.state.as_str() {
+            "Running" => ("●", theme::STATUS_OK, "Running"),
+            "Starting" => ("◐", theme::STATUS_WARN, "Starting"),
+            "Stopping" => ("◑", theme::STATUS_WARN, "Stopping"),
+            "Stopped" => ("○", theme::STATUS_BAD, "Stopped"),
+            other => ("·", theme::STATUS_IDLE, other),
         };
-        ui.colored_label(color, format!("{icon} {}", model.status.state));
+        status_chip(ui, color, icon, label);
         ui.separator();
-        ui.label(format!(
-            "文件夹 {} · 节点 {}",
-            model.status.folder_count, model.status.node_count
-        ));
+        ui.label(
+            egui::RichText::new(format!(
+                "📁 {} 文件夹 · 📊 {} 节点",
+                model.status.folder_count, model.status.node_count
+            ))
+            .small()
+            .color(theme::TEXT_MUTED),
+        );
         ui.separator();
-        ui.label(format!("Endpoint: {}", model.status.endpoint_url));
+        ui.label(
+            egui::RichText::new("Endpoint")
+                .small()
+                .color(theme::TEXT_FAINT),
+        );
+        ui.label(
+            egui::RichText::new(&model.status.endpoint_url)
+                .small()
+                .monospace()
+                .color(theme::TEXT_MUTED),
+        );
+        ui.with_layout(
+            egui::Layout::right_to_left(egui::Align::Center),
+            |ui| {
+                ui.label(
+                    egui::RichText::new(format!("seq #{}", model.last_sim_seq))
+                        .small()
+                        .color(theme::TEXT_FAINT),
+                );
+            },
+        );
     });
 }

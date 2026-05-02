@@ -16,6 +16,7 @@ pub struct MasterApp {
 impl MasterApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         opcuaegui_shared::fonts::install_cjk_fonts(&cc.egui_ctx);
+        opcuaegui_shared::theme::apply(&cc.egui_ctx);
         let (backend, event_rx) = BackendHandle::new(
             cc.egui_ctx.clone(),
             "opcua-master-backend",
@@ -130,9 +131,10 @@ impl MasterApp {
                 if self.model.value_panel.pending_write_req == Some(req_id) {
                     self.model.value_panel.pending_write_req = None;
                 }
-                self.model.value_panel.last_result = Some(format!("✔ 写入成功 ({node_id})"));
-                self.model
-                    .push_toast(crate::events::ToastLevel::Info, "写入成功");
+                self.model.push_toast(
+                    crate::events::ToastLevel::Info,
+                    format!("写入成功 ({node_id})"),
+                );
             }
             BackendEvent::CommLogEntries { conn_id, entries } => {
                 self.model
@@ -328,15 +330,18 @@ impl MasterApp {
                 ui.vertical(|ui| {
                     for t in &self.model.toasts {
                         let color = match t.level {
-                            crate::events::ToastLevel::Info => egui::Color32::LIGHT_BLUE,
-                            crate::events::ToastLevel::Warn => egui::Color32::YELLOW,
-                            crate::events::ToastLevel::Error => egui::Color32::LIGHT_RED,
+                            crate::events::ToastLevel::Info => {
+                                opcuaegui_shared::theme::STATUS_INFO
+                            }
+                            crate::events::ToastLevel::Warn => {
+                                opcuaegui_shared::theme::STATUS_WARN
+                            }
+                            crate::events::ToastLevel::Error => {
+                                opcuaegui_shared::theme::STATUS_BAD
+                            }
                         };
-                        egui::Frame::popup(ui.style())
-                            .fill(egui::Color32::from_black_alpha(230))
-                            .show(ui, |ui| {
-                                ui.colored_label(color, &t.message);
-                            });
+                        opcuaegui_shared::widgets::toast_card(ui, color, &t.message);
+                        ui.add_space(4.0);
                     }
                 });
             });
@@ -385,41 +390,57 @@ impl eframe::App for MasterApp {
 
             egui::CentralPanel::default().show_inside(ui, |ui| {
                 ui.horizontal(|ui| {
-                    if ui
-                        .selectable_label(
-                            matches!(
-                                self.model.central_tab,
-                                crate::model::CentralPanelTab::DataTable
-                            ),
-                            "📊 监控表",
-                        )
-                        .clicked()
-                    {
+                    ui.spacing_mut().item_spacing.x = 4.0;
+                    let data_selected = matches!(
+                        self.model.central_tab,
+                        crate::model::CentralPanelTab::DataTable
+                    );
+                    if tab_button(ui, data_selected, "📊  监控表", false).0.clicked() {
                         self.model.central_tab = crate::model::CentralPanelTab::DataTable;
                     }
                     let mut clicked_tab: Option<usize> = None;
+                    let mut close_tab: Option<usize> = None;
                     for (i, tab) in self.model.history_tabs.iter().enumerate() {
-                        let label = format!("📈 {}", tab.display_name);
+                        let label = format!("📈  {}", tab.display_name);
                         let selected = matches!(
                             self.model.central_tab,
                             crate::model::CentralPanelTab::History(j) if j == i
                         );
-                        if ui.selectable_label(selected, &label).clicked() {
+                        let (resp, close_resp) = tab_button(ui, selected, &label, true);
+                        if resp.clicked() {
                             clicked_tab = Some(i);
+                        }
+                        if let Some(c) = close_resp {
+                            if c.clicked() {
+                                close_tab = Some(i);
+                            }
                         }
                     }
                     if let Some(i) = clicked_tab {
                         self.model.central_tab = crate::model::CentralPanelTab::History(i);
                     }
+                    if let Some(i) = close_tab {
+                        self.model.history_tabs.remove(i);
+                        if self.model.history_tabs.is_empty() {
+                            self.model.central_tab =
+                                crate::model::CentralPanelTab::DataTable;
+                        } else if let crate::model::CentralPanelTab::History(j) =
+                            self.model.central_tab
+                        {
+                            let new_idx =
+                                if j >= i { j.saturating_sub(1).min(self.model.history_tabs.len() - 1) } else { j };
+                            self.model.central_tab =
+                                crate::model::CentralPanelTab::History(new_idx);
+                        }
+                    }
                 });
-                ui.separator();
+                ui.add_space(4.0);
 
                 match self.model.central_tab.clone() {
                     crate::model::CentralPanelTab::DataTable => {
                         data_table::show(ui, &mut self.model, &self.backend);
                     }
                     crate::model::CentralPanelTab::History(idx) => {
-                        let mut close_idx: Option<usize> = None;
                         if let Some(state) = self.model.history_tabs.get_mut(idx) {
                             if state.pending_req.is_none() && state.last_loaded.is_none() {
                                 crate::panels::history_tab::dispatch_refresh(
@@ -436,22 +457,8 @@ impl eframe::App for MasterApp {
                                     &mut self.model.next_req_id,
                                 );
                             }
-                            if actions.close {
-                                close_idx = Some(idx);
-                            }
                         } else {
                             self.model.central_tab = crate::model::CentralPanelTab::DataTable;
-                        }
-                        if let Some(i) = close_idx {
-                            self.model.history_tabs.remove(i);
-                            if self.model.history_tabs.is_empty() {
-                                self.model.central_tab =
-                                    crate::model::CentralPanelTab::DataTable;
-                            } else {
-                                let new_idx = i.min(self.model.history_tabs.len() - 1);
-                                self.model.central_tab =
-                                    crate::model::CentralPanelTab::History(new_idx);
-                            }
                         }
                     }
                 }
@@ -474,6 +481,61 @@ impl eframe::App for MasterApp {
             );
         }
     }
+}
+
+/// Renders one central-area tab. Returns `(label_response, optional close_response)`.
+/// The visual style mimics a browser tab: rounded top corners, soft fill when
+/// inactive, accent-tinted fill when active, and an inset close glyph.
+fn tab_button(
+    ui: &mut egui::Ui,
+    selected: bool,
+    label: &str,
+    closable: bool,
+) -> (egui::Response, Option<egui::Response>) {
+    use opcuaegui_shared::theme;
+    let fill = if selected {
+        theme::ACCENT_SOFT
+    } else {
+        theme::BG_PANEL
+    };
+    let stroke = if selected {
+        egui::Stroke::new(1.0, theme::ACCENT)
+    } else {
+        egui::Stroke::new(1.0, theme::BORDER)
+    };
+    let text_color = if selected {
+        theme::TEXT_PRIMARY
+    } else {
+        theme::TEXT_MUTED
+    };
+    let mut close_resp: Option<egui::Response> = None;
+    let inner = egui::Frame::default()
+        .fill(fill)
+        .stroke(stroke)
+        .corner_radius(egui::CornerRadius {
+            nw: 6,
+            ne: 6,
+            sw: 0,
+            se: 0,
+        })
+        .inner_margin(egui::Margin::symmetric(10, 5))
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 6.0;
+                ui.label(egui::RichText::new(label).color(text_color).strong());
+                if closable {
+                    let r = ui.add(
+                        egui::Label::new(
+                            egui::RichText::new("✕").color(theme::TEXT_FAINT).small(),
+                        )
+                        .sense(egui::Sense::click()),
+                    );
+                    close_resp = Some(r);
+                }
+            });
+        });
+    let resp = inner.response.interact(egui::Sense::click());
+    (resp, close_resp)
 }
 
 fn default_input_for(arg: &crate::events::MethodArgInfo) -> String {

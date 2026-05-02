@@ -1,6 +1,6 @@
 [package]
 name = "opcuamaster-egui"
-version = "0.2.0"
+version = "0.4.0"
 description = "OPCUAMaster (egui) - Cross-platform OPC UA Master Station"
 edition = "2021"
 rust-version = "1.77.2"

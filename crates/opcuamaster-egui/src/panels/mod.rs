@@ -7,16 +7,17 @@ pub mod toolbar;
 pub mod value_panel;
 
 pub fn quality_color(q: &str) -> egui::Color32 {
+    use opcuaegui_shared::theme;
     if q.is_empty() {
-        egui::Color32::GRAY
+        theme::STATUS_IDLE
     } else if q.starts_with("Good") {
-        egui::Color32::from_rgb(120, 200, 120)
+        theme::STATUS_OK
     } else if q.starts_with("Bad") || q.contains("Error") {
-        egui::Color32::from_rgb(220, 100, 100)
+        theme::STATUS_BAD
     } else if q.starts_with("Uncertain") {
-        egui::Color32::from_rgb(220, 200, 100)
+        theme::STATUS_WARN
     } else {
-        egui::Color32::LIGHT_GRAY
+        theme::TEXT_MUTED
     }
 }
 

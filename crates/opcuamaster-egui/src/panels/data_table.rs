@@ -1,4 +1,6 @@
 use egui_extras::{Column, TableBuilder};
+use opcuaegui_shared::theme;
+use opcuaegui_shared::widgets::{empty_state, status_chip};
 
 use crate::events::UiCommand;
 use crate::model::AppModel;
@@ -6,17 +8,41 @@ use crate::runtime::BackendHandle;
 
 pub fn show(ui: &mut egui::Ui, model: &mut AppModel, backend: &BackendHandle) {
     let Some(conn_id) = model.selected_conn.clone() else {
-        ui.label("左侧选择一个连接以查看监控数据。");
+        empty_state(
+            ui,
+            "📡",
+            "未选择连接",
+            Some("从左侧连接列表选择一个已连接的实例"),
+        );
         return;
     };
 
     ui.horizontal(|ui| {
-        ui.heading("监控数据");
+        ui.label(
+            egui::RichText::new("监控数据")
+                .strong()
+                .color(theme::TEXT_PRIMARY),
+        );
+        let total_rows = model
+            .monitor
+            .per_conn
+            .get(&conn_id)
+            .map(|p| p.rows.len())
+            .unwrap_or(0);
+        ui.label(
+            egui::RichText::new(format!("· {total_rows} 个节点"))
+                .small()
+                .color(theme::TEXT_MUTED),
+        );
         ui.separator();
-        ui.label("搜索:");
+        ui.label(
+            egui::RichText::new("搜索")
+                .small()
+                .color(theme::TEXT_MUTED),
+        );
         let resp = ui.add(
             egui::TextEdit::singleline(&mut model.monitor.search)
-                .desired_width(200.0)
+                .desired_width(220.0)
                 .hint_text("NodeId / Name / Value"),
         );
         if resp.changed() {
@@ -25,8 +51,17 @@ pub fn show(ui: &mut egui::Ui, model: &mut AppModel, backend: &BackendHandle) {
         ui.separator();
         let selected_count = model.monitor.selected_rows.len();
         if selected_count > 0 {
-            ui.label(format!("已选 {selected_count} 行"));
-            if ui.button("🗑 移除选中").clicked() {
+            status_chip(
+                ui,
+                theme::ACCENT,
+                "▣",
+                &format!("已选 {selected_count}"),
+            );
+            if ui
+                .button("🗑 移除选中")
+                .on_hover_text("Delete / Backspace")
+                .clicked()
+            {
                 let ids: Vec<String> = model.monitor.selected_rows.iter().cloned().collect();
                 backend.send(UiCommand::RemoveMonitoredNodes {
                     conn_id: conn_id.clone(),
@@ -66,7 +101,12 @@ pub fn show(ui: &mut egui::Ui, model: &mut AppModel, backend: &BackendHandle) {
     let rows_ref = per.map(|p| &p.rows);
 
     if rows_ref.map(|r| r.is_empty()).unwrap_or(true) {
-        ui.label("(尚无订阅节点,点击工具栏 🌲 浏览节点 添加)");
+        empty_state(
+            ui,
+            "🌲",
+            "尚无订阅节点",
+            Some("点击工具栏 🌲 浏览节点，勾选变量后添加"),
+        );
         return;
     }
 
