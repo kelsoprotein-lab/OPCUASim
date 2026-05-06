@@ -1,10 +1,8 @@
-use std::collections::BTreeMap;
-
 use opcuaegui_shared::theme;
-use opcuaegui_shared::widgets::empty_state;
+use opcuaegui_shared::widgets::{empty_state, OBJECTS_ROOT_ID};
 
 use crate::events::UiCommand;
-use crate::model::AppModel;
+use crate::model::{AddressChild, AppModel};
 use crate::runtime::BackendHandle;
 
 pub fn show(ui: &mut egui::Ui, model: &mut AppModel, backend: &BackendHandle) {
@@ -12,7 +10,7 @@ pub fn show(ui: &mut egui::Ui, model: &mut AppModel, backend: &BackendHandle) {
         egui::RichText::new("ADDRESS SPACE")
             .strong()
             .small()
-            .color(theme::TEXT_MUTED),
+            .color(theme::TEXT_MUTED()),
     );
     ui.separator();
 
@@ -26,75 +24,51 @@ pub fn show(ui: &mut egui::Ui, model: &mut AppModel, backend: &BackendHandle) {
         return;
     }
 
-    // parent_id -> child list
-    let mut children: BTreeMap<String, Vec<Child>> = BTreeMap::new();
-    for f in &model.address_space.folders {
-        children
-            .entry(f.parent_id.clone())
-            .or_default()
-            .push(Child::Folder {
-                node_id: f.node_id.clone(),
-                display_name: f.display_name.clone(),
-            });
-    }
-    for n in &model.address_space.nodes {
-        children
-            .entry(n.parent_id.clone())
-            .or_default()
-            .push(Child::Node {
-                node_id: n.node_id.clone(),
-                display_name: n.display_name.clone(),
-            });
-    }
+    model.ensure_address_index();
 
     egui::ScrollArea::vertical()
         .auto_shrink([false, false])
         .show(ui, |ui| {
-            let root = "Objects".to_string();
             let resp = egui::CollapsingHeader::new(
                 egui::RichText::new("📁 Objects")
-                    .color(theme::TEXT_PRIMARY)
+                    .color(theme::TEXT_PRIMARY())
                     .strong(),
             )
             .id_salt("addr_root")
             .default_open(true)
             .show(ui, |ui| {
-                render_children(ui, &root, &children, model, backend);
+                render_children(ui, OBJECTS_ROOT_ID, model, backend);
             });
             resp.header_response.context_menu(|ui| {
-                add_subfolder_menu(ui, "Objects", model, backend);
+                add_subfolder_menu(ui, OBJECTS_ROOT_ID, model, backend);
             });
         });
-}
-
-enum Child {
-    Folder { node_id: String, display_name: String },
-    Node { node_id: String, display_name: String },
 }
 
 fn render_children(
     ui: &mut egui::Ui,
     parent: &str,
-    children: &BTreeMap<String, Vec<Child>>,
     model: &mut AppModel,
     backend: &BackendHandle,
 ) {
-    let Some(list) = children.get(parent) else {
+    // Snapshot the children list for this parent so we can recurse into a
+    // mutable borrow of `model` for grandchildren without aliasing.
+    let Some(children) = model.address_index.get(parent).cloned() else {
         return;
     };
-    for ch in list {
+    for ch in children {
         match ch {
-            Child::Folder {
+            AddressChild::Folder {
                 node_id,
                 display_name,
             } => {
                 let label = egui::RichText::new(format!("📁 {}", display_name))
-                    .color(theme::TEXT_PRIMARY);
+                    .color(theme::TEXT_PRIMARY());
                 let resp = egui::CollapsingHeader::new(label)
-                    .id_salt(("folder", node_id))
+                    .id_salt(("folder", &node_id))
                     .default_open(false)
                     .show(ui, |ui| {
-                        render_children(ui, node_id, children, model, backend);
+                        render_children(ui, &node_id, model, backend);
                     });
                 let nid = node_id.clone();
                 resp.header_response.context_menu(|ui| {
@@ -105,13 +79,13 @@ fn render_children(
                     }
                 });
             }
-            Child::Node {
+            AddressChild::Node {
                 node_id,
                 display_name,
             } => {
                 let label = egui::RichText::new(format!("📊 {}", display_name))
-                    .color(theme::TEXT_PRIMARY);
-                let selected = model.selected_node_id.as_deref() == Some(node_id);
+                    .color(theme::TEXT_PRIMARY());
+                let selected = model.selected_node_id.as_deref() == Some(node_id.as_str());
                 let resp = ui.selectable_label(selected, label);
                 if resp.clicked() {
                     model.selected_node_id = Some(node_id.clone());
@@ -138,7 +112,7 @@ fn add_subfolder_menu(
     ui.label(
         egui::RichText::new("新建子文件夹")
             .small()
-            .color(theme::TEXT_MUTED),
+            .color(theme::TEXT_MUTED()),
     );
     let buf = model
         .subfolder_inputs

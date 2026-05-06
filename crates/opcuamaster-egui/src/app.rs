@@ -16,6 +16,9 @@ pub struct MasterApp {
 impl MasterApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         opcuaegui_shared::fonts::install_cjk_fonts(&cc.egui_ctx);
+        if let Some(s) = opcuaegui_shared::settings::load(crate::APP_ID) {
+            opcuaegui_shared::theme::set_mode(s.theme);
+        }
         opcuaegui_shared::theme::apply(&cc.egui_ctx);
         let (backend, event_rx) = BackendHandle::new(
             cc.egui_ctx.clone(),
@@ -50,19 +53,14 @@ impl MasterApp {
             ));
         }
         if cmd_s {
-            if let Some(path) = rfd::FileDialog::new()
-                .set_file_name("project.opcuaproj")
-                .add_filter("OPCUA Project", &["opcuaproj", "json"])
-                .save_file()
-            {
+            if let Some(path) = opcuaegui_shared::widgets::pick_save_project_path(
+                "project.opcuaproj",
+            ) {
                 self.backend.send(UiCommand::SaveProject(path));
             }
         }
         if cmd_o {
-            if let Some(path) = rfd::FileDialog::new()
-                .add_filter("OPCUA Project", &["opcuaproj", "json"])
-                .pick_file()
-            {
+            if let Some(path) = opcuaegui_shared::widgets::pick_open_project_path() {
                 self.backend.send(UiCommand::LoadProject(path));
             }
         }
@@ -137,17 +135,24 @@ impl MasterApp {
                 );
             }
             BackendEvent::CommLogEntries { conn_id, entries } => {
+                let paused = self.model.logs.paused;
+                let was_dirty = !paused;
                 self.model
                     .logs
                     .per_conn
                     .entry(conn_id)
                     .or_default()
-                    .append(entries);
+                    .append(entries, paused);
+                if was_dirty {
+                    self.model.logs.filter_dirty = true;
+                }
             }
             BackendEvent::LogsCleared { conn_id } => {
                 if let Some(per) = self.model.logs.per_conn.get_mut(&conn_id) {
                     per.entries.clear();
+                    per.paused_buf.clear();
                 }
+                self.model.logs.filter_dirty = true;
             }
             BackendEvent::Groups(list) => {
                 self.model.groups = list;
@@ -201,7 +206,7 @@ impl MasterApp {
                     .find(|t| t.pending_req == Some(req_id) && t.node_id == node_id)
                 {
                     tab.pending_req = None;
-                    tab.points = points;
+                    tab.set_points(points);
                     tab.error = error;
                     tab.last_loaded = Some(std::time::Instant::now());
                 }
@@ -324,27 +329,20 @@ impl MasterApp {
             return;
         }
         ctx.request_repaint_after(std::time::Duration::from_millis(500));
-        egui::Area::new("toasts".into())
-            .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-16.0, -16.0))
-            .show(ctx, |ui| {
-                ui.vertical(|ui| {
-                    for t in &self.model.toasts {
-                        let color = match t.level {
-                            crate::events::ToastLevel::Info => {
-                                opcuaegui_shared::theme::STATUS_INFO
-                            }
-                            crate::events::ToastLevel::Warn => {
-                                opcuaegui_shared::theme::STATUS_WARN
-                            }
-                            crate::events::ToastLevel::Error => {
-                                opcuaegui_shared::theme::STATUS_BAD
-                            }
-                        };
-                        opcuaegui_shared::widgets::toast_card(ui, color, &t.message);
-                        ui.add_space(4.0);
-                    }
-                });
-            });
+        let items: Vec<(egui::Color32, String)> = self
+            .model
+            .toasts
+            .iter()
+            .map(|t| {
+                let color = match t.level {
+                    crate::events::ToastLevel::Info => opcuaegui_shared::theme::STATUS_INFO(),
+                    crate::events::ToastLevel::Warn => opcuaegui_shared::theme::STATUS_WARN(),
+                    crate::events::ToastLevel::Error => opcuaegui_shared::theme::STATUS_BAD(),
+                };
+                (color, t.message.clone())
+            })
+            .collect();
+        opcuaegui_shared::widgets::render_toasts(ctx, items, egui::vec2(-16.0, -16.0));
     }
 }
 
@@ -419,18 +417,29 @@ impl eframe::App for MasterApp {
                     if let Some(i) = clicked_tab {
                         self.model.central_tab = crate::model::CentralPanelTab::History(i);
                     }
-                    if let Some(i) = close_tab {
-                        self.model.history_tabs.remove(i);
-                        if self.model.history_tabs.is_empty() {
+                    if let Some(closed) = close_tab {
+                        self.model.history_tabs.remove(closed);
+                        let remaining = self.model.history_tabs.len();
+                        if remaining == 0 {
                             self.model.central_tab =
                                 crate::model::CentralPanelTab::DataTable;
-                        } else if let crate::model::CentralPanelTab::History(j) =
+                        } else if let crate::model::CentralPanelTab::History(active) =
                             self.model.central_tab
                         {
-                            let new_idx =
-                                if j >= i { j.saturating_sub(1).min(self.model.history_tabs.len() - 1) } else { j };
+                            // Three cases:
+                            //   active < closed → indices to the left are stable
+                            //   active == closed → focus the previous tab (or 0)
+                            //   active > closed → shift left by one
+                            let new_idx = if active < closed {
+                                active
+                            } else if active == closed {
+                                active.saturating_sub(1)
+                            } else {
+                                active - 1
+                            };
+                            let clamped = new_idx.min(remaining - 1);
                             self.model.central_tab =
-                                crate::model::CentralPanelTab::History(new_idx);
+                                crate::model::CentralPanelTab::History(clamped);
                         }
                     }
                 });
@@ -477,6 +486,7 @@ impl eframe::App for MasterApp {
                 &opcuaegui_shared::settings::WindowSettings {
                     width: self.last_size.0,
                     height: self.last_size.1,
+                    theme: opcuaegui_shared::theme::current_mode(),
                 },
             );
         }
@@ -494,19 +504,19 @@ fn tab_button(
 ) -> (egui::Response, Option<egui::Response>) {
     use opcuaegui_shared::theme;
     let fill = if selected {
-        theme::ACCENT_SOFT
+        theme::ACCENT_SOFT()
     } else {
-        theme::BG_PANEL
+        theme::BG_PANEL()
     };
     let stroke = if selected {
-        egui::Stroke::new(1.0, theme::ACCENT)
+        egui::Stroke::new(1.0, theme::ACCENT())
     } else {
-        egui::Stroke::new(1.0, theme::BORDER)
+        egui::Stroke::new(1.0, theme::BORDER())
     };
     let text_color = if selected {
-        theme::TEXT_PRIMARY
+        theme::TEXT_PRIMARY()
     } else {
-        theme::TEXT_MUTED
+        theme::TEXT_MUTED()
     };
     let mut close_resp: Option<egui::Response> = None;
     let inner = egui::Frame::default()
@@ -526,7 +536,7 @@ fn tab_button(
                 if closable {
                     let r = ui.add(
                         egui::Label::new(
-                            egui::RichText::new("✕").color(theme::TEXT_FAINT).small(),
+                            egui::RichText::new("✕").color(theme::TEXT_FAINT()).small(),
                         )
                         .sense(egui::Sense::click()),
                     );

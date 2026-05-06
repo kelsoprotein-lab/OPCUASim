@@ -15,6 +15,9 @@ pub struct ServerApp {
 impl ServerApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         opcuaegui_shared::fonts::install_cjk_fonts(&cc.egui_ctx);
+        if let Some(s) = opcuaegui_shared::settings::load(crate::APP_ID) {
+            opcuaegui_shared::theme::set_mode(s.theme);
+        }
         opcuaegui_shared::theme::apply(&cc.egui_ctx);
         let (backend, event_rx) = BackendHandle::new(
             cc.egui_ctx.clone(),
@@ -39,19 +42,14 @@ impl ServerApp {
             )
         });
         if cmd_s {
-            if let Some(path) = rfd::FileDialog::new()
-                .set_file_name("server.opcuaproj")
-                .add_filter("OPCUA Server Project", &["opcuaproj", "json"])
-                .save_file()
-            {
+            if let Some(path) = opcuaegui_shared::widgets::pick_save_project_path(
+                "server.opcuaproj",
+            ) {
                 self.backend.send(UiCommand::SaveProject(path));
             }
         }
         if cmd_o {
-            if let Some(path) = rfd::FileDialog::new()
-                .add_filter("OPCUA Server Project", &["opcuaproj", "json"])
-                .pick_file()
-            {
+            if let Some(path) = opcuaegui_shared::widgets::pick_open_project_path() {
                 self.backend.send(UiCommand::LoadProject(path));
             }
         }
@@ -65,6 +63,7 @@ impl ServerApp {
                 }
                 BackendEvent::AddressSpace(dto) => {
                     self.model.address_space = dto;
+                    self.model.address_index_dirty = true;
                 }
                 BackendEvent::SimValues { seq, values } => {
                     for (nid, val) in values {
@@ -94,24 +93,19 @@ impl ServerApp {
             return;
         }
         ctx.request_repaint_after(std::time::Duration::from_millis(500));
-        egui::Area::new("toasts".into())
-            .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-16.0, -40.0))
-            .show(ctx, |ui| {
-                ui.vertical(|ui| {
-                    for t in &self.model.toasts {
-                        let color = match t.level {
-                            crate::events::ToastLevel::Info => {
-                                opcuaegui_shared::theme::STATUS_INFO
-                            }
-                            crate::events::ToastLevel::Error => {
-                                opcuaegui_shared::theme::STATUS_BAD
-                            }
-                        };
-                        opcuaegui_shared::widgets::toast_card(ui, color, &t.message);
-                        ui.add_space(4.0);
-                    }
-                });
-            });
+        let items: Vec<(egui::Color32, String)> = self
+            .model
+            .toasts
+            .iter()
+            .map(|t| {
+                let color = match t.level {
+                    crate::events::ToastLevel::Info => opcuaegui_shared::theme::STATUS_INFO(),
+                    crate::events::ToastLevel::Error => opcuaegui_shared::theme::STATUS_BAD(),
+                };
+                (color, t.message.clone())
+            })
+            .collect();
+        opcuaegui_shared::widgets::render_toasts(ctx, items, egui::vec2(-16.0, -40.0));
     }
 }
 
@@ -167,6 +161,7 @@ impl eframe::App for ServerApp {
                 &opcuaegui_shared::settings::WindowSettings {
                     width: self.last_size.0,
                     height: self.last_size.1,
+                    theme: opcuaegui_shared::theme::current_mode(),
                 },
             );
         }

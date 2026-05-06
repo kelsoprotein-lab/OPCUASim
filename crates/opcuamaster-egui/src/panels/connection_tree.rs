@@ -1,5 +1,5 @@
 use opcuaegui_shared::theme;
-use opcuaegui_shared::widgets::{empty_state, status_chip};
+use opcuaegui_shared::widgets::{connection_state_chip, empty_state, status_chip};
 
 use crate::events::UiCommand;
 use crate::model::AppModel;
@@ -11,7 +11,7 @@ pub fn show(ui: &mut egui::Ui, model: &mut AppModel, backend: &BackendHandle) {
             egui::RichText::new("CONNECTIONS")
                 .strong()
                 .small()
-                .color(theme::TEXT_MUTED),
+                .color(theme::TEXT_MUTED()),
         );
         ui.separator();
         if model.connections.is_empty() {
@@ -22,21 +22,16 @@ pub fn show(ui: &mut egui::Ui, model: &mut AppModel, backend: &BackendHandle) {
                 Some("点击工具栏 ➕ 新建连接"),
             );
         } else {
-            let conns = model.connections.clone();
-            for conn in &conns {
+            let mut clicked: Option<String> = None;
+            for conn in &model.connections {
                 let selected = model.selected_conn.as_deref() == Some(&conn.id);
-                let (icon, color, label) = match conn.state.as_str() {
-                    "Connected" => ("●", theme::STATUS_OK, "在线"),
-                    "Connecting" => ("◐", theme::STATUS_WARN, "连接中"),
-                    "Disconnected" => ("○", theme::STATUS_BAD, "离线"),
-                    _ => ("·", theme::STATUS_IDLE, conn.state.as_str()),
-                };
+                let (icon, color, label) = connection_state_chip(conn.state.as_str());
                 let resp = ui.horizontal(|ui| {
                     let r = ui.selectable_label(
                         selected,
                         egui::RichText::new(&conn.name)
                             .strong()
-                            .color(theme::TEXT_PRIMARY),
+                            .color(theme::TEXT_PRIMARY()),
                     );
                     ui.with_layout(
                         egui::Layout::right_to_left(egui::Align::Center),
@@ -47,14 +42,14 @@ pub fn show(ui: &mut egui::Ui, model: &mut AppModel, backend: &BackendHandle) {
                     r
                 });
                 if resp.inner.clicked() {
-                    model.selected_conn = Some(conn.id.clone());
+                    clicked = Some(conn.id.clone());
                 }
                 if selected {
                     ui.indent(&conn.id, |ui| {
                         ui.label(
                             egui::RichText::new(&conn.endpoint_url)
                                 .small()
-                                .color(theme::TEXT_MUTED),
+                                .color(theme::TEXT_MUTED()),
                         );
                         ui.label(
                             egui::RichText::new(format!(
@@ -62,10 +57,13 @@ pub fn show(ui: &mut egui::Ui, model: &mut AppModel, backend: &BackendHandle) {
                                 conn.auth_type, conn.security_policy, conn.security_mode
                             ))
                             .small()
-                            .color(theme::TEXT_FAINT),
+                            .color(theme::TEXT_FAINT()),
                         );
                     });
                 }
+            }
+            if let Some(id) = clicked {
+                model.selected_conn = Some(id);
             }
         }
 
@@ -75,7 +73,7 @@ pub fn show(ui: &mut egui::Ui, model: &mut AppModel, backend: &BackendHandle) {
             egui::RichText::new("GROUPS")
                 .strong()
                 .small()
-                .color(theme::TEXT_MUTED),
+                .color(theme::TEXT_MUTED()),
         );
         ui.horizontal(|ui| {
             ui.add(
@@ -97,20 +95,19 @@ pub fn show(ui: &mut egui::Ui, model: &mut AppModel, backend: &BackendHandle) {
             ui.label(
                 egui::RichText::new("(暂无分组)")
                     .small()
-                    .color(theme::TEXT_FAINT),
+                    .color(theme::TEXT_FAINT()),
             );
         } else {
-            let groups = model.groups.clone();
-            for g in &groups {
+            for g in &model.groups {
                 ui.horizontal(|ui| {
                     ui.label(
                         egui::RichText::new(format!("· {}", g.name))
-                            .color(theme::TEXT_PRIMARY),
+                            .color(theme::TEXT_PRIMARY()),
                     );
                     ui.label(
                         egui::RichText::new(format!("({})", g.node_ids.len()))
                             .small()
-                            .color(theme::TEXT_MUTED),
+                            .color(theme::TEXT_MUTED()),
                     );
                     ui.with_layout(
                         egui::Layout::right_to_left(egui::Align::Center),

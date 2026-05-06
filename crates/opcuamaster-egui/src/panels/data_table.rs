@@ -21,7 +21,7 @@ pub fn show(ui: &mut egui::Ui, model: &mut AppModel, backend: &BackendHandle) {
         ui.label(
             egui::RichText::new("监控数据")
                 .strong()
-                .color(theme::TEXT_PRIMARY),
+                .color(theme::TEXT_PRIMARY()),
         );
         let total_rows = model
             .monitor
@@ -32,13 +32,13 @@ pub fn show(ui: &mut egui::Ui, model: &mut AppModel, backend: &BackendHandle) {
         ui.label(
             egui::RichText::new(format!("· {total_rows} 个节点"))
                 .small()
-                .color(theme::TEXT_MUTED),
+                .color(theme::TEXT_MUTED()),
         );
         ui.separator();
         ui.label(
             egui::RichText::new("搜索")
                 .small()
-                .color(theme::TEXT_MUTED),
+                .color(theme::TEXT_MUTED()),
         );
         let resp = ui.add(
             egui::TextEdit::singleline(&mut model.monitor.search)
@@ -53,7 +53,7 @@ pub fn show(ui: &mut egui::Ui, model: &mut AppModel, backend: &BackendHandle) {
         if selected_count > 0 {
             status_chip(
                 ui,
-                theme::ACCENT,
+                theme::ACCENT(),
                 "▣",
                 &format!("已选 {selected_count}"),
             );
@@ -95,12 +95,13 @@ pub fn show(ui: &mut egui::Ui, model: &mut AppModel, backend: &BackendHandle) {
     });
     ui.separator();
 
-    let filtered = model.monitor.ensure_filter(&conn_id).to_vec();
-    let total = filtered.len();
-    let per = model.monitor.per_conn.get(&conn_id);
-    let rows_ref = per.map(|p| &p.rows);
-
-    if rows_ref.map(|r| r.is_empty()).unwrap_or(true) {
+    let rows_empty = model
+        .monitor
+        .per_conn
+        .get(&conn_id)
+        .map(|p| p.rows.is_empty())
+        .unwrap_or(true);
+    if rows_empty {
         empty_state(
             ui,
             "🌲",
@@ -110,10 +111,24 @@ pub fn show(ui: &mut egui::Ui, model: &mut AppModel, backend: &BackendHandle) {
         return;
     }
 
-    let ctx_modifiers = ui.ctx().input(|i| i.modifiers);
-    let ctrl_held = ctx_modifiers.ctrl || ctx_modifiers.command;
+    let _ = model.monitor.ensure_filter(&conn_id);
+    let total = model.monitor.filtered_cache.len();
 
-    let mut history_request: Option<(String, String)> = None;
+    let modifiers = ui.ctx().input(|i| i.modifiers);
+    let ctrl_held = modifiers.ctrl || modifiers.command;
+    let shift_held = modifiers.shift;
+
+    enum RowAction {
+        Click {
+            filtered_idx: usize,
+            node_id: String,
+        },
+        History {
+            node_id: String,
+            display_name: String,
+        },
+    }
+    let mut action: Option<RowAction> = None;
 
     let mut table = TableBuilder::new(ui)
         .striped(true)
@@ -138,12 +153,14 @@ pub fn show(ui: &mut egui::Ui, model: &mut AppModel, backend: &BackendHandle) {
             }
         })
         .body(|body| {
+            let cache = &model.monitor.filtered_cache;
+            let rows = model.monitor.per_conn.get(&conn_id).map(|p| &p.rows);
             body.rows(20.0, total, |mut row| {
                 let idx = row.index();
-                let Some(node_id) = filtered.get(idx) else {
+                let Some(node_id) = cache.get(idx) else {
                     return;
                 };
-                let Some(rows) = rows_ref else { return };
+                let Some(rows) = rows else { return };
                 let Some(data) = rows.get(node_id) else {
                     return;
                 };
@@ -180,34 +197,76 @@ pub fn show(ui: &mut egui::Ui, model: &mut AppModel, backend: &BackendHandle) {
 
                 let row_resp = row.response();
                 if row_resp.clicked() {
-                    if ctrl_held {
-                        if selected {
-                            model.monitor.selected_rows.remove(node_id);
-                        } else {
-                            model.monitor.selected_rows.insert(node_id.clone());
-                        }
-                    } else {
-                        model.monitor.selected_rows.clear();
-                        model.monitor.selected_rows.insert(node_id.clone());
-                    }
-                    model.monitor.focused_row = Some(node_id.clone());
-                    model.value_panel.attrs = None;
-                    model.value_panel.write_value.clear();
-                    model.value_panel.last_result = None;
+                    action = Some(RowAction::Click {
+                        filtered_idx: idx,
+                        node_id: node_id.clone(),
+                    });
                 }
                 let nid = data.node_id.clone();
                 let dname = data.display_name.clone();
                 row_resp.context_menu(|ui| {
                     if ui.button("📈 查看历史").clicked() {
-                        history_request = Some((nid.clone(), dname.clone()));
+                        action = Some(RowAction::History {
+                            node_id: nid.clone(),
+                            display_name: dname.clone(),
+                        });
                         ui.close();
                     }
                 });
             });
         });
 
-    if let Some((nid, dname)) = history_request {
-        crate::panels::browse_panel::open_history_tab(model, &conn_id, &nid, &dname);
+    match action {
+        Some(RowAction::Click { filtered_idx, node_id }) => {
+            if shift_held {
+                if let Some(anchor) = model.monitor.last_clicked_filtered_idx {
+                    let (lo, hi) = if anchor <= filtered_idx {
+                        (anchor, filtered_idx)
+                    } else {
+                        (filtered_idx, anchor)
+                    };
+                    if !ctrl_held {
+                        model.monitor.selected_rows.clear();
+                    }
+                    let ids_to_add: Vec<String> = model
+                        .monitor
+                        .filtered_cache
+                        .iter()
+                        .skip(lo)
+                        .take(hi - lo + 1)
+                        .cloned()
+                        .collect();
+                    for id in ids_to_add {
+                        model.monitor.selected_rows.insert(id);
+                    }
+                } else {
+                    model.monitor.selected_rows.insert(node_id.clone());
+                }
+            } else if ctrl_held {
+                if model.monitor.selected_rows.contains(&node_id) {
+                    model.monitor.selected_rows.remove(&node_id);
+                } else {
+                    model.monitor.selected_rows.insert(node_id.clone());
+                }
+                model.monitor.last_clicked_filtered_idx = Some(filtered_idx);
+            } else {
+                model.monitor.selected_rows.clear();
+                model.monitor.selected_rows.insert(node_id.clone());
+                model.monitor.last_clicked_filtered_idx = Some(filtered_idx);
+            }
+            model.monitor.focused_row = Some(node_id);
+            model.value_panel.attrs = None;
+            model.value_panel.write_value.clear();
+            model.value_panel.last_result = None;
+        }
+        Some(RowAction::History { node_id, display_name }) => {
+            crate::panels::browse_panel::open_history_tab(
+                model,
+                &conn_id,
+                &node_id,
+                &display_name,
+            );
+        }
+        None => {}
     }
 }
-

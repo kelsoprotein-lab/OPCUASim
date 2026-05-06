@@ -136,9 +136,12 @@ fn render_tree(
                 }
                 return;
             }
-            let roots = model.browse.roots.clone();
-            for root in roots {
-                render_node(ui, &root, model, backend, conn_id);
+            // Snapshot just the root id list (length is small); recursing
+            // requires a mutable borrow of `model`, which would alias an
+            // immutable borrow of `model.browse.roots`.
+            let roots: Vec<String> = model.browse.roots.clone();
+            for root in &roots {
+                render_node(ui, root, model, backend, conn_id, true);
             }
         });
 }
@@ -149,6 +152,7 @@ fn render_node(
     model: &mut AppModel,
     backend: &BackendHandle,
     conn_id: &str,
+    is_root: bool,
 ) {
     let (display, has_children, is_variable, is_method, loading, children) = {
         let Some(st) = model.browse.nodes.get(node_id) else {
@@ -191,7 +195,7 @@ fn render_node(
             }
             let resp = egui::CollapsingHeader::new(display)
                 .id_salt(id)
-                .default_open(false)
+                .default_open(is_root)
                 .show(ui, |ui| {
                     if loading {
                         ui.horizontal(|ui| {
@@ -201,7 +205,7 @@ fn render_node(
                     } else if let Some(ids) = &children {
                         let ids = ids.clone();
                         for cid in ids {
-                            render_node(ui, &cid, model, backend, conn_id);
+                            render_node(ui, &cid, model, backend, conn_id, false);
                         }
                     }
                 });
@@ -280,14 +284,7 @@ fn render_node(
 }
 
 fn find_parent_object(model: &AppModel, node_id: &str) -> Option<String> {
-    for (pid, st) in &model.browse.nodes {
-        if let Some(kids) = &st.children {
-            if kids.iter().any(|k| k == node_id) {
-                return Some(pid.clone());
-            }
-        }
-    }
-    None
+    model.browse.parent_of.get(node_id).cloned()
 }
 
 pub fn open_history_tab(
@@ -400,6 +397,12 @@ pub fn apply_browse_result(
             model.browse.root_loaded = true;
         }
         Some(pid) => {
+            for cid in &ids {
+                model
+                    .browse
+                    .parent_of
+                    .insert(cid.clone(), pid.clone());
+            }
             if let Some(st) = model.browse.nodes.get_mut(&pid) {
                 st.loading = false;
                 st.expanded = true;
