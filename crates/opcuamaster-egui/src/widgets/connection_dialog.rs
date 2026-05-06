@@ -71,8 +71,14 @@ impl ConnDialogState {
         if self.name.trim().is_empty() {
             return Err("连接名不能为空".into());
         }
-        if self.endpoint_url.trim().is_empty() {
+        let url = self.endpoint_url.trim();
+        if url.is_empty() {
             return Err("Endpoint URL 不能为空".into());
+        }
+        if !url.starts_with("opc.tcp://") {
+            return Err(
+                "Endpoint URL 必须以 opc.tcp:// 开头（OPC UA 不支持 http/https）".into(),
+            );
         }
         let auth = match self.auth {
             AuthKind::Anonymous => AuthKindReq::Anonymous,
@@ -142,10 +148,18 @@ pub fn show(
 
                     ui.label("Endpoint URL");
                     ui.horizontal(|ui| {
-                        ui.add(
-                            egui::TextEdit::singleline(&mut state.endpoint_url)
-                                .desired_width(280.0),
-                        );
+                        let url_trim = state.endpoint_url.trim();
+                        let scheme_ok = url_trim.is_empty()
+                            || url_trim.starts_with("opc.tcp://");
+                        let mut edit = egui::TextEdit::singleline(&mut state.endpoint_url)
+                            .desired_width(280.0);
+                        if !scheme_ok {
+                            edit = edit.text_color(opcuaegui_shared::theme::STATUS_BAD());
+                        }
+                        let resp = ui.add(edit);
+                        if !scheme_ok {
+                            resp.on_hover_text("OPC UA 仅支持 opc.tcp:// 协议");
+                        }
                         let btn_label = if state.discovery_in_flight {
                             "发现中…"
                         } else {

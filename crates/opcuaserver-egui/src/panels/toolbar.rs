@@ -1,6 +1,8 @@
 use opcuasim_core::server::models::DataType;
 use opcuaegui_shared::theme;
-use opcuaegui_shared::widgets::status_chip;
+use opcuaegui_shared::widgets::{
+    pick_open_project_path, pick_save_project_path, status_chip, OBJECTS_ROOT_ID,
+};
 
 use crate::events::{AddNodeReq, UiCommand};
 use crate::model::{AppModel, SimKind};
@@ -12,16 +14,16 @@ pub fn show(ui: &mut egui::Ui, model: &mut AppModel, backend: &BackendHandle) {
             egui::RichText::new("OPCUAServer")
                 .strong()
                 .size(15.0)
-                .color(theme::ACCENT),
+                .color(theme::ACCENT()),
         );
         let running = model.status.state == "Running";
         let starting = model.status.state == "Starting";
         let (icon, color, label) = match model.status.state.as_str() {
-            "Running" => ("●", theme::STATUS_OK, "运行中"),
-            "Starting" => ("◐", theme::STATUS_WARN, "启动中"),
-            "Stopping" => ("◑", theme::STATUS_WARN, "停止中"),
-            "Stopped" => ("○", theme::STATUS_BAD, "已停止"),
-            other => ("·", theme::STATUS_IDLE, other),
+            "Running" => ("●", theme::STATUS_OK(), "运行中"),
+            "Starting" => ("◐", theme::STATUS_WARN(), "启动中"),
+            "Stopping" => ("◑", theme::STATUS_WARN(), "停止中"),
+            "Stopped" => ("○", theme::STATUS_BAD(), "已停止"),
+            other => ("·", theme::STATUS_IDLE(), other),
         };
         status_chip(ui, color, icon, label);
 
@@ -42,22 +44,36 @@ pub fn show(ui: &mut egui::Ui, model: &mut AppModel, backend: &BackendHandle) {
         ui.label(
             egui::RichText::new("Endpoint")
                 .small()
-                .color(theme::TEXT_MUTED),
+                .color(theme::TEXT_MUTED()),
         );
         ui.monospace(&model.status.endpoint_url);
 
         ui.with_layout(
             egui::Layout::right_to_left(egui::Align::Center),
             |ui| {
+                let mode = opcuaegui_shared::theme::current_mode();
+                let (label, hint) = match mode {
+                    opcuaegui_shared::theme::ThemeMode::Dark => ("🌞", "切换到浅色主题"),
+                    opcuaegui_shared::theme::ThemeMode::Light => ("🌙", "切换到暗色主题"),
+                };
+                if ui.button(label).on_hover_text(hint).clicked() {
+                    let next = match mode {
+                        opcuaegui_shared::theme::ThemeMode::Dark => {
+                            opcuaegui_shared::theme::ThemeMode::Light
+                        }
+                        opcuaegui_shared::theme::ThemeMode::Light => {
+                            opcuaegui_shared::theme::ThemeMode::Dark
+                        }
+                    };
+                    opcuaegui_shared::theme::set_mode(next);
+                    opcuaegui_shared::theme::apply(ui.ctx());
+                }
                 if ui
                     .button("📂 打开")
                     .on_hover_text("Cmd/Ctrl+O")
                     .clicked()
                 {
-                    if let Some(path) = rfd::FileDialog::new()
-                        .add_filter("OPCUA Server Project", &["opcuaproj", "json"])
-                        .pick_file()
-                    {
+                    if let Some(path) = pick_open_project_path() {
                         backend.send(UiCommand::LoadProject(path));
                     }
                 }
@@ -66,11 +82,7 @@ pub fn show(ui: &mut egui::Ui, model: &mut AppModel, backend: &BackendHandle) {
                     .on_hover_text("Cmd/Ctrl+S")
                     .clicked()
                 {
-                    if let Some(path) = rfd::FileDialog::new()
-                        .set_file_name("server.opcuaproj")
-                        .add_filter("OPCUA Server Project", &["opcuaproj", "json"])
-                        .save_file()
-                    {
+                    if let Some(path) = pick_save_project_path("server.opcuaproj") {
                         backend.send(UiCommand::SaveProject(path));
                     }
                 }
@@ -84,7 +96,7 @@ pub fn show(ui: &mut egui::Ui, model: &mut AppModel, backend: &BackendHandle) {
         ui.label(
             egui::RichText::new("📁 新建文件夹")
                 .small()
-                .color(theme::TEXT_MUTED),
+                .color(theme::TEXT_MUTED()),
         );
         ui.add(
             egui::TextEdit::singleline(&mut model.new_folder_name)
@@ -99,7 +111,7 @@ pub fn show(ui: &mut egui::Ui, model: &mut AppModel, backend: &BackendHandle) {
                 backend.send(UiCommand::AddFolder {
                     node_id,
                     display_name: name,
-                    parent_id: "Objects".to_string(),
+                    parent_id: OBJECTS_ROOT_ID.to_string(),
                 });
                 model.new_folder_name.clear();
             }
@@ -110,7 +122,7 @@ pub fn show(ui: &mut egui::Ui, model: &mut AppModel, backend: &BackendHandle) {
         ui.label(
             egui::RichText::new("📊 新建节点")
                 .small()
-                .color(theme::TEXT_MUTED),
+                .color(theme::TEXT_MUTED()),
         );
         add_node_form(ui, model, backend);
     });

@@ -67,7 +67,7 @@ pub fn show(ui: &mut egui::Ui, model: &mut AppModel, backend: &BackendHandle) {
                 egui::RichText::new(value)
                     .size(22.0)
                     .monospace()
-                    .color(theme::TEXT_PRIMARY),
+                    .color(theme::TEXT_PRIMARY()),
             );
             if let Some(q) = &row.quality {
                 ui.colored_label(super::quality_color(q), q);
@@ -128,14 +128,21 @@ pub fn show(ui: &mut egui::Ui, model: &mut AppModel, backend: &BackendHandle) {
                 .as_ref()
                 .map(|r| r.data_type.clone())
                 .unwrap_or_else(|| "Unknown".to_string());
+            let parse_err = parse_check(&data_type, &model.value_panel.write_value);
             ui.horizontal(|ui| {
                 ui.label(
                     egui::RichText::new(&data_type)
                         .small()
-                        .color(theme::TEXT_MUTED),
+                        .color(theme::TEXT_MUTED()),
                 );
-                ui.text_edit_singleline(&mut model.value_panel.write_value);
+                let mut edit =
+                    egui::TextEdit::singleline(&mut model.value_panel.write_value);
+                if parse_err.is_some() {
+                    edit = edit.text_color(theme::STATUS_BAD());
+                }
+                ui.add(edit);
                 let enabled = !model.value_panel.write_value.trim().is_empty()
+                    && parse_err.is_none()
                     && model.value_panel.pending_write_req.is_none();
                 ui.add_enabled_ui(enabled, |ui| {
                     if ui.button("写入").clicked() {
@@ -154,8 +161,58 @@ pub fn show(ui: &mut egui::Ui, model: &mut AppModel, backend: &BackendHandle) {
                     ui.spinner();
                 }
             });
+            if let Some(msg) = parse_err {
+                ui.label(
+                    egui::RichText::new(msg)
+                        .small()
+                        .color(theme::STATUS_BAD()),
+                );
+            }
         }
     });
+}
+
+/// Light-weight client-side type check for the write field. Returns a short
+/// error string when the input clearly cannot be coerced to the declared
+/// data type. Empty input returns `None` because the submit button already
+/// disables on empty.
+fn parse_check(data_type: &str, raw: &str) -> Option<&'static str> {
+    let s = raw.trim();
+    if s.is_empty() {
+        return None;
+    }
+    match data_type {
+        "Boolean" => {
+            let lower = s.to_ascii_lowercase();
+            if matches!(lower.as_str(), "true" | "false" | "0" | "1") {
+                None
+            } else {
+                Some("需要 true/false 或 0/1")
+            }
+        }
+        "Float" | "Double" => {
+            if s.parse::<f64>().is_ok() {
+                None
+            } else {
+                Some("需要浮点数")
+            }
+        }
+        "SByte" | "Int16" | "Int32" | "Int64" => {
+            if s.parse::<i64>().is_ok() {
+                None
+            } else {
+                Some("需要整数")
+            }
+        }
+        "Byte" | "UInt16" | "UInt32" | "UInt64" => {
+            if s.parse::<u64>().is_ok() {
+                None
+            } else {
+                Some("需要非负整数")
+            }
+        }
+        _ => None,
+    }
 }
 
 fn access_str(level: u8) -> String {

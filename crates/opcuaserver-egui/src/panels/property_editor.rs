@@ -30,7 +30,7 @@ pub fn show(ui: &mut egui::Ui, model: &mut AppModel, backend: &BackendHandle) {
             ui.label(
                 egui::RichText::new("Writable:")
                     .small()
-                    .color(theme::TEXT_MUTED),
+                    .color(theme::TEXT_MUTED()),
             );
             let mut w = node.writable;
             if ui.checkbox(&mut w, "").changed() {
@@ -56,7 +56,7 @@ pub fn show(ui: &mut egui::Ui, model: &mut AppModel, backend: &BackendHandle) {
             egui::RichText::new(current)
                 .size(22.0)
                 .monospace()
-                .color(theme::TEXT_PRIMARY),
+                .color(theme::TEXT_PRIMARY()),
         );
         ui.add_space(6.0);
 
@@ -85,7 +85,7 @@ fn edit_simulation(ui: &mut egui::Ui, sim: &mut SimulationMode) -> bool {
             ui.label(
                 egui::RichText::new("Static")
                     .small()
-                    .color(theme::TEXT_MUTED),
+                    .color(theme::TEXT_MUTED()),
             );
             let resp = ui.text_edit_singleline(value);
             if resp.lost_focus() && resp.changed() {
@@ -100,7 +100,7 @@ fn edit_simulation(ui: &mut egui::Ui, sim: &mut SimulationMode) -> bool {
             ui.label(
                 egui::RichText::new("Random")
                     .small()
-                    .color(theme::TEXT_MUTED),
+                    .color(theme::TEXT_MUTED()),
             );
             egui::Grid::new("random_grid")
                 .num_columns(2)
@@ -128,7 +128,7 @@ fn edit_simulation(ui: &mut egui::Ui, sim: &mut SimulationMode) -> bool {
             ui.label(
                 egui::RichText::new("Sine")
                     .small()
-                    .color(theme::TEXT_MUTED),
+                    .color(theme::TEXT_MUTED()),
             );
             egui::Grid::new("sine_grid").num_columns(2).show(ui, |ui| {
                 ui.label("Amplitude");
@@ -162,7 +162,7 @@ fn edit_simulation(ui: &mut egui::Ui, sim: &mut SimulationMode) -> bool {
             ui.label(
                 egui::RichText::new("Linear")
                     .small()
-                    .color(theme::TEXT_MUTED),
+                    .color(theme::TEXT_MUTED()),
             );
             egui::Grid::new("linear_grid")
                 .num_columns(2)
@@ -208,7 +208,7 @@ fn edit_simulation(ui: &mut egui::Ui, sim: &mut SimulationMode) -> bool {
             ui.label(
                 egui::RichText::new("Script (evalexpr)")
                     .small()
-                    .color(theme::TEXT_MUTED),
+                    .color(theme::TEXT_MUTED()),
             );
             ui.add(
                 egui::TextEdit::multiline(expression)

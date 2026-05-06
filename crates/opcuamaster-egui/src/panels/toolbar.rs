@@ -1,5 +1,7 @@
 use opcuaegui_shared::theme;
-use opcuaegui_shared::widgets::status_chip;
+use opcuaegui_shared::widgets::{
+    connection_state_chip, pick_open_project_path, pick_save_project_path, status_chip,
+};
 
 use crate::events::UiCommand;
 use crate::model::{AppModel, Modal};
@@ -12,7 +14,7 @@ pub fn show(ui: &mut egui::Ui, model: &mut AppModel, backend: &BackendHandle) {
             egui::RichText::new("OPCUAMaster")
                 .strong()
                 .size(15.0)
-                .color(theme::ACCENT),
+                .color(theme::ACCENT()),
         );
 
         let sel_info = model
@@ -23,14 +25,9 @@ pub fn show(ui: &mut egui::Ui, model: &mut AppModel, backend: &BackendHandle) {
             ui.label(
                 egui::RichText::new(format!("· {}", info.name))
                     .small()
-                    .color(theme::TEXT_MUTED),
+                    .color(theme::TEXT_MUTED()),
             );
-            let (icon, color, label) = match info.state.as_str() {
-                "Connected" => ("●", theme::STATUS_OK, "在线"),
-                "Connecting" => ("◐", theme::STATUS_WARN, "连接中"),
-                "Disconnected" => ("○", theme::STATUS_BAD, "离线"),
-                other => ("·", theme::STATUS_IDLE, other),
-            };
+            let (icon, color, label) = connection_state_chip(info.state.as_str());
             status_chip(ui, color, icon, label);
         }
 
@@ -114,11 +111,7 @@ pub fn show(ui: &mut egui::Ui, model: &mut AppModel, backend: &BackendHandle) {
             .on_hover_text("Cmd/Ctrl+S — 保存项目")
             .clicked()
         {
-            if let Some(path) = rfd::FileDialog::new()
-                .set_file_name("project.opcuaproj")
-                .add_filter("OPCUA Project", &["opcuaproj", "json"])
-                .save_file()
-            {
+            if let Some(path) = pick_save_project_path("project.opcuaproj") {
                 backend.send(UiCommand::SaveProject(path));
             }
         }
@@ -127,10 +120,7 @@ pub fn show(ui: &mut egui::Ui, model: &mut AppModel, backend: &BackendHandle) {
             .on_hover_text("Cmd/Ctrl+O — 加载项目")
             .clicked()
         {
-            if let Some(path) = rfd::FileDialog::new()
-                .add_filter("OPCUA Project", &["opcuaproj", "json"])
-                .pick_file()
-            {
+            if let Some(path) = pick_open_project_path() {
                 backend.send(UiCommand::LoadProject(path));
             }
         }
@@ -138,6 +128,23 @@ pub fn show(ui: &mut egui::Ui, model: &mut AppModel, backend: &BackendHandle) {
         ui.separator();
 
         // ─── Group: System ─────────────────────────────────────────────
+        let mode = opcuaegui_shared::theme::current_mode();
+        let (label, hint) = match mode {
+            opcuaegui_shared::theme::ThemeMode::Dark => ("🌞", "切换到浅色主题"),
+            opcuaegui_shared::theme::ThemeMode::Light => ("🌙", "切换到暗色主题"),
+        };
+        if ui.button(label).on_hover_text(hint).clicked() {
+            let next = match mode {
+                opcuaegui_shared::theme::ThemeMode::Dark => {
+                    opcuaegui_shared::theme::ThemeMode::Light
+                }
+                opcuaegui_shared::theme::ThemeMode::Light => {
+                    opcuaegui_shared::theme::ThemeMode::Dark
+                }
+            };
+            opcuaegui_shared::theme::set_mode(next);
+            opcuaegui_shared::theme::apply(ui.ctx());
+        }
         if ui
             .button("🔐 证书")
             .on_hover_text("管理 PKI 信任 / 拒绝列表")

@@ -2,10 +2,16 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+use crate::theme::ThemeMode;
+
 #[derive(Serialize, Deserialize)]
 pub struct WindowSettings {
     pub width: f32,
     pub height: f32,
+    /// Persisted theme preference. `serde(default)` keeps existing JSON files
+    /// (which lack this field) deserialisable.
+    #[serde(default)]
+    pub theme: ThemeMode,
 }
 
 pub fn settings_path(name: &str) -> Option<PathBuf> {

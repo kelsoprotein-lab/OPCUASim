@@ -3,7 +3,7 @@ use egui_extras::{Column, TableBuilder};
 use opcuaegui_shared::theme;
 
 use crate::events::UiCommand;
-use crate::model::{AppModel, LogDirectionFilter, LogPerConn};
+use crate::model::{AppModel, LogDirectionFilter};
 use crate::runtime::BackendHandle;
 
 pub fn show(ui: &mut egui::Ui, model: &mut AppModel, backend: &BackendHandle) {
@@ -11,15 +11,24 @@ pub fn show(ui: &mut egui::Ui, model: &mut AppModel, backend: &BackendHandle) {
         ui.horizontal(|ui| {
             ui.label(
                 egui::RichText::new("通信日志 (未选择连接)")
-                    .color(theme::TEXT_MUTED),
+                    .color(theme::TEXT_MUTED()),
             );
         });
         return;
     };
 
-    let empty = LogPerConn::default();
-    let per = model.logs.per_conn.get(&conn_id).unwrap_or(&empty);
-    let total = per.entries.len();
+    let total = model
+        .logs
+        .per_conn
+        .get(&conn_id)
+        .map(|p| p.entries.len())
+        .unwrap_or(0);
+    let buffered = model
+        .logs
+        .per_conn
+        .get(&conn_id)
+        .map(|p| p.paused_buf.len())
+        .unwrap_or(0);
 
     ui.horizontal(|ui| {
         let icon = if model.logs.expanded { "▼" } else { "▲" };
@@ -28,6 +37,7 @@ pub fn show(ui: &mut egui::Ui, model: &mut AppModel, backend: &BackendHandle) {
         }
         ui.separator();
         ui.label("方向:");
+        let prev_filter = model.logs.filter;
         egui::ComboBox::from_id_salt("log_dir")
             .selected_text(match model.logs.filter {
                 LogDirectionFilter::All => "All",
@@ -47,13 +57,50 @@ pub fn show(ui: &mut egui::Ui, model: &mut AppModel, backend: &BackendHandle) {
                     "Response",
                 );
             });
+        if prev_filter != model.logs.filter {
+            model.logs.filter_dirty = true;
+        }
         ui.separator();
         ui.label("搜索:");
-        ui.add(
+        let search_resp = ui.add(
             egui::TextEdit::singleline(&mut model.logs.search)
                 .desired_width(200.0)
                 .hint_text("Service / Detail"),
         );
+        if search_resp.changed() {
+            model.logs.filter_dirty = true;
+        }
+        ui.separator();
+
+        // Pause / Resume
+        let pause_label = if model.logs.paused {
+            format!("▶ 恢复 ({buffered})")
+        } else {
+            "⏸ 暂停".to_string()
+        };
+        if ui
+            .button(pause_label)
+            .on_hover_text(if model.logs.paused {
+                "恢复实时日志，缓冲条目将被合并"
+            } else {
+                "暂停实时追加，新日志先入缓冲区"
+            })
+            .clicked()
+        {
+            if model.logs.paused {
+                if let Some(per) = model.logs.per_conn.get_mut(&conn_id) {
+                    per.flush_paused();
+                }
+                model.logs.paused = false;
+                model.logs.filter_dirty = true;
+            } else {
+                model.logs.paused = true;
+            }
+        }
+
+        ui.checkbox(&mut model.logs.auto_scroll, "自动滚动")
+            .on_hover_text("新日志到达时滚动到底部");
+
         ui.separator();
         if ui.button("清空").clicked() {
             backend.send(UiCommand::ClearCommLogs(conn_id.clone()));
@@ -79,29 +126,11 @@ pub fn show(ui: &mut egui::Ui, model: &mut AppModel, backend: &BackendHandle) {
 
     ui.separator();
 
-    let filter = model.logs.filter;
-    let needle = model.logs.search.trim().to_lowercase();
-    let filtered: Vec<usize> = per
-        .entries
-        .iter()
-        .enumerate()
-        .filter(|(_, e)| match filter {
-            LogDirectionFilter::All => true,
-            LogDirectionFilter::Request => e.direction == "Request",
-            LogDirectionFilter::Response => e.direction == "Response",
-        })
-        .filter(|(_, e)| {
-            if needle.is_empty() {
-                true
-            } else {
-                e.service.to_lowercase().contains(&needle)
-                    || e.detail.to_lowercase().contains(&needle)
-            }
-        })
-        .map(|(i, _)| i)
-        .collect();
+    model.logs.ensure_filter(&conn_id);
+    let filtered_len = model.logs.filtered_cache.len();
+    let auto_scroll = model.logs.auto_scroll && !model.logs.paused;
 
-    TableBuilder::new(ui)
+    let mut builder = TableBuilder::new(ui)
         .striped(true)
         .resizable(true)
         .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
@@ -109,7 +138,11 @@ pub fn show(ui: &mut egui::Ui, model: &mut AppModel, backend: &BackendHandle) {
         .column(Column::initial(90.0).at_least(70.0))
         .column(Column::initial(140.0).at_least(80.0))
         .column(Column::remainder().at_least(200.0))
-        .column(Column::initial(90.0).at_least(60.0))
+        .column(Column::initial(90.0).at_least(60.0));
+    if auto_scroll && filtered_len > 0 {
+        builder = builder.scroll_to_row(filtered_len - 1, Some(egui::Align::BOTTOM));
+    }
+    builder
         .header(20.0, |mut header| {
             for label in ["Timestamp", "Direction", "Service", "Detail", "Status"] {
                 header.col(|ui| {
@@ -118,25 +151,32 @@ pub fn show(ui: &mut egui::Ui, model: &mut AppModel, backend: &BackendHandle) {
             }
         })
         .body(|body| {
-            body.rows(18.0, filtered.len(), |mut row| {
-                let Some(idx) = filtered.get(row.index()) else {
+            let cache = &model.logs.filtered_cache;
+            let entries = model
+                .logs
+                .per_conn
+                .get(&conn_id)
+                .map(|p| &p.entries[..])
+                .unwrap_or(&[]);
+            body.rows(18.0, cache.len(), |mut row| {
+                let Some(idx) = cache.get(row.index()) else {
                     return;
                 };
-                let Some(entry) = per.entries.get(*idx) else {
+                let Some(entry) = entries.get(*idx) else {
                     return;
                 };
                 let ts = format_local_ts(entry.timestamp_ms);
                 let dir_color = match entry.direction.as_str() {
-                    "Request" => theme::STATUS_OK,
-                    "Response" => theme::STATUS_INFO,
-                    _ => theme::STATUS_IDLE,
+                    "Request" => theme::STATUS_OK(),
+                    "Response" => theme::STATUS_INFO(),
+                    _ => theme::STATUS_IDLE(),
                 };
                 row.col(|ui| {
                     ui.label(
                         egui::RichText::new(ts)
                             .monospace()
                             .small()
-                            .color(theme::TEXT_MUTED),
+                            .color(theme::TEXT_MUTED()),
                     );
                 });
                 row.col(|ui| {

@@ -1,8 +1,14 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use opcuasim_core::server::models::{DataType, ServerConfig, SimulationMode};
 
 use crate::events::{AddressSpaceDto, ServerStatus};
+
+#[derive(Debug, Clone)]
+pub enum AddressChild {
+    Folder { node_id: String, display_name: String },
+    Node { node_id: String, display_name: String },
+}
 
 pub struct AppModel {
     pub status: ServerStatus,
@@ -11,6 +17,8 @@ pub struct AppModel {
     pub selected_node_id: Option<String>,
     /// Multi-selection set populated via Ctrl/Cmd+Click in the node table.
     pub selected_node_ids: HashSet<String>,
+    /// Anchor row for Shift+Click range selection in the node table.
+    pub last_clicked_row: Option<usize>,
     pub current_values: HashMap<String, String>, // node_id -> latest value
     pub last_sim_seq: u64,
     pub add_node_form: AddNodeForm,
@@ -18,6 +26,9 @@ pub struct AppModel {
     /// Per-parent text-input buffers used by the "新建子文件夹" right-click menu.
     pub subfolder_inputs: HashMap<String, String>,
     pub toasts: Vec<Toast>,
+    /// Cached `parent_id -> Vec<children>` index, rebuilt only when the address space changes.
+    pub address_index_dirty: bool,
+    pub address_index: BTreeMap<String, Vec<AddressChild>>,
 }
 
 impl Default for AppModel {
@@ -33,12 +44,15 @@ impl Default for AppModel {
             config: ServerConfig::default(),
             selected_node_id: None,
             selected_node_ids: HashSet::new(),
+            last_clicked_row: None,
             current_values: HashMap::new(),
             last_sim_seq: 0,
             add_node_form: AddNodeForm::default(),
             new_folder_name: String::new(),
             subfolder_inputs: HashMap::new(),
             toasts: Vec::new(),
+            address_index_dirty: true,
+            address_index: BTreeMap::new(),
         }
     }
 }
@@ -55,6 +69,34 @@ impl AppModel {
     pub fn selected_node(&self) -> Option<&crate::events::NodeRow> {
         let id = self.selected_node_id.as_deref()?;
         self.address_space.nodes.iter().find(|n| n.node_id == id)
+    }
+
+    /// Rebuild `address_index` from the current `address_space` if it has been
+    /// invalidated. Cheap to call every frame — does nothing once clean.
+    pub fn ensure_address_index(&mut self) {
+        if !self.address_index_dirty {
+            return;
+        }
+        self.address_index.clear();
+        for f in &self.address_space.folders {
+            self.address_index
+                .entry(f.parent_id.clone())
+                .or_default()
+                .push(AddressChild::Folder {
+                    node_id: f.node_id.clone(),
+                    display_name: f.display_name.clone(),
+                });
+        }
+        for n in &self.address_space.nodes {
+            self.address_index
+                .entry(n.parent_id.clone())
+                .or_default()
+                .push(AddressChild::Node {
+                    node_id: n.node_id.clone(),
+                    display_name: n.display_name.clone(),
+                });
+        }
+        self.address_index_dirty = false;
     }
 }
 

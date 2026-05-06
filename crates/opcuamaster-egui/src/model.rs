@@ -58,6 +58,9 @@ pub struct HistoryTabState {
     pub pending_req: Option<u64>,
     pub error: Option<String>,
     pub last_loaded: Option<std::time::Instant>,
+    /// Cached `[unix_secs, value]` pairs derived from `points`. Refreshed on
+    /// `set_points` rather than every frame.
+    pub plot_cache: Vec<[f64; 2]>,
 }
 
 impl HistoryTabState {
@@ -75,7 +78,85 @@ impl HistoryTabState {
             pending_req: None,
             error: None,
             last_loaded: None,
+            plot_cache: Vec::new(),
         }
+    }
+
+    /// Replace `points` and refresh the cached `[ts, value]` plot data.
+    pub fn set_points(&mut self, points: Vec<crate::events::HistoryPointDto>) {
+        use chrono::DateTime;
+        self.plot_cache.clear();
+        self.plot_cache.reserve(points.len());
+        for p in &points {
+            let Ok(dt) = DateTime::parse_from_rfc3339(&p.source_timestamp) else {
+                continue;
+            };
+            let Some(v) = p.numeric else { continue };
+            self.plot_cache
+                .push([dt.timestamp_millis() as f64 / 1000.0, v]);
+        }
+        self.points = points;
+    }
+}
+
+impl Default for LogState {
+    fn default() -> Self {
+        Self {
+            per_conn: HashMap::new(),
+            expanded: false,
+            filter: LogDirectionFilter::All,
+            search: String::new(),
+            paused: false,
+            auto_scroll: true,
+            filter_dirty: true,
+            filtered_cache: Vec::new(),
+            last_filter_key: (String::new(), LogDirectionFilter::All, String::new(), 0),
+        }
+    }
+}
+
+impl LogState {
+    /// Rebuilds `filtered_cache` lazily — only when conn / filter / search /
+    /// entry count changed since the last call.
+    pub fn ensure_filter(&mut self, conn_id: &str) {
+        let entries_len = self
+            .per_conn
+            .get(conn_id)
+            .map(|p| p.entries.len())
+            .unwrap_or(0);
+        let key = (
+            conn_id.to_string(),
+            self.filter,
+            self.search.clone(),
+            entries_len,
+        );
+        if !self.filter_dirty && key == self.last_filter_key {
+            return;
+        }
+        self.filtered_cache.clear();
+        let needle = self.search.trim().to_lowercase();
+        if let Some(per) = self.per_conn.get(conn_id) {
+            for (i, e) in per.entries.iter().enumerate() {
+                let dir_ok = matches!(
+                    (self.filter, e.direction.as_str()),
+                    (LogDirectionFilter::All, _)
+                        | (LogDirectionFilter::Request, "Request")
+                        | (LogDirectionFilter::Response, "Response")
+                );
+                if !dir_ok {
+                    continue;
+                }
+                if !needle.is_empty()
+                    && !e.service.to_lowercase().contains(&needle)
+                    && !e.detail.to_lowercase().contains(&needle)
+                {
+                    continue;
+                }
+                self.filtered_cache.push(i);
+            }
+        }
+        self.filter_dirty = false;
+        self.last_filter_key = key;
     }
 }
 
@@ -190,6 +271,9 @@ pub struct BrowseState {
     pub trigger: crate::events::DataChangeTriggerKindReq,
     pub deadband_kind: crate::events::DeadbandKindReq,
     pub deadband_value: f64,
+    /// child node id → parent node id, populated incrementally as browse
+    /// results arrive. Used to find a method's owner Object O(1).
+    pub parent_of: HashMap<String, String>,
 }
 
 pub struct BrowseNodeState {
@@ -209,6 +293,8 @@ pub struct MonitorState {
     pub filtered_cache: Vec<String>,
     pub last_conn_for_filter: Option<String>,
     pub last_search_for_filter: String,
+    /// Anchor index in `filtered_cache` for Shift+Click range selection.
+    pub last_clicked_filtered_idx: Option<usize>,
 }
 
 #[derive(Default)]
@@ -228,23 +314,46 @@ pub enum LogDirectionFilter {
     Response,
 }
 
-#[derive(Default)]
 pub struct LogState {
     pub per_conn: HashMap<String, LogPerConn>,
     pub expanded: bool,
     pub filter: LogDirectionFilter,
     pub search: String,
+    pub paused: bool,
+    pub auto_scroll: bool,
+    pub filter_dirty: bool,
+    pub filtered_cache: Vec<usize>,
+    pub last_filter_key: (String, LogDirectionFilter, String, usize),
 }
 
 #[derive(Default)]
 pub struct LogPerConn {
     pub entries: Vec<LogRow>,
+    /// Buffered while paused — flushed back into `entries` when resumed.
+    pub paused_buf: Vec<LogRow>,
 }
 
 impl LogPerConn {
-    pub fn append(&mut self, mut rows: Vec<LogRow>) {
+    pub fn append(&mut self, mut rows: Vec<LogRow>, paused: bool) {
         const MAX: usize = 10_000;
+        if paused {
+            self.paused_buf.append(&mut rows);
+            if self.paused_buf.len() > MAX {
+                let excess = self.paused_buf.len() - MAX;
+                self.paused_buf.drain(0..excess);
+            }
+            return;
+        }
         self.entries.append(&mut rows);
+        if self.entries.len() > MAX {
+            let excess = self.entries.len() - MAX;
+            self.entries.drain(0..excess);
+        }
+    }
+
+    pub fn flush_paused(&mut self) {
+        const MAX: usize = 10_000;
+        self.entries.append(&mut self.paused_buf);
         if self.entries.len() > MAX {
             let excess = self.entries.len() - MAX;
             self.entries.drain(0..excess);
@@ -310,6 +419,7 @@ impl Default for BrowseState {
             trigger: crate::events::DataChangeTriggerKindReq::StatusValue,
             deadband_kind: crate::events::DeadbandKindReq::None,
             deadband_value: 0.0,
+            parent_of: HashMap::new(),
         }
     }
 }

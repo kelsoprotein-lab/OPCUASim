@@ -28,12 +28,12 @@ pub fn show(ui: &mut egui::Ui, state: &mut HistoryTabState) -> TabActions {
         ui.label(
             egui::RichText::new(format!("📈 {}", state.display_name))
                 .strong()
-                .color(opcuaegui_shared::theme::TEXT_PRIMARY),
+                .color(opcuaegui_shared::theme::TEXT_PRIMARY()),
         );
         ui.label(
             egui::RichText::new(&state.node_id)
                 .small()
-                .color(opcuaegui_shared::theme::TEXT_MUTED),
+                .color(opcuaegui_shared::theme::TEXT_MUTED()),
         );
     });
 
@@ -42,7 +42,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut HistoryTabState) -> TabActions {
         ui.label(
             egui::RichText::new("快捷")
                 .small()
-                .color(opcuaegui_shared::theme::TEXT_MUTED),
+                .color(opcuaegui_shared::theme::TEXT_MUTED()),
         );
         for (label, secs) in QUICK_RANGES {
             let is_active = active_secs == Some(*secs);
@@ -57,18 +57,48 @@ pub fn show(ui: &mut egui::Ui, state: &mut HistoryTabState) -> TabActions {
         }
     });
 
+    let start_valid = DateTime::parse_from_rfc3339(&state.start_iso).is_ok();
+    let end_valid = DateTime::parse_from_rfc3339(&state.end_iso).is_ok();
+    let range_valid = match (
+        DateTime::parse_from_rfc3339(&state.start_iso).ok(),
+        DateTime::parse_from_rfc3339(&state.end_iso).ok(),
+    ) {
+        (Some(s), Some(e)) => s < e,
+        _ => false,
+    };
+
     ui.horizontal(|ui| {
         ui.label("起");
-        ui.add(egui::TextEdit::singleline(&mut state.start_iso).desired_width(220.0));
+        let mut start_edit =
+            egui::TextEdit::singleline(&mut state.start_iso).desired_width(220.0);
+        if !start_valid {
+            start_edit = start_edit.text_color(opcuaegui_shared::theme::STATUS_BAD());
+        }
+        let start_resp = ui.add(start_edit);
+        if !start_valid {
+            start_resp.on_hover_text("RFC3339 格式，如 2026-05-04T12:00:00Z");
+        }
         ui.label("止");
-        ui.add(egui::TextEdit::singleline(&mut state.end_iso).desired_width(220.0));
+        let mut end_edit =
+            egui::TextEdit::singleline(&mut state.end_iso).desired_width(220.0);
+        if !end_valid {
+            end_edit = end_edit.text_color(opcuaegui_shared::theme::STATUS_BAD());
+        }
+        let end_resp = ui.add(end_edit);
+        if !end_valid {
+            end_resp.on_hover_text("RFC3339 格式，如 2026-05-04T12:05:00Z");
+        }
         ui.label("最多");
         ui.add(egui::DragValue::new(&mut state.max_values).range(10..=50_000));
         let busy = state.pending_req.is_some();
+        let can_refresh = !busy && range_valid;
         let resp = ui.add_enabled(
-            !busy,
+            can_refresh,
             egui::Button::new(if busy { "加载中…" } else { "🔄 刷新" }),
         );
+        if !range_valid && !busy {
+            resp.clone().on_hover_text("起始时间必须早于结束时间且格式有效");
+        }
         if resp.clicked() {
             actions.refresh = true;
         }
@@ -77,7 +107,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut HistoryTabState) -> TabActions {
             ui.label(
                 egui::RichText::new(format!("{} 个点", state.points.len()))
                     .small()
-                    .color(opcuaegui_shared::theme::TEXT_MUTED),
+                    .color(opcuaegui_shared::theme::TEXT_MUTED()),
             );
         }
     });
@@ -85,22 +115,12 @@ pub fn show(ui: &mut egui::Ui, state: &mut HistoryTabState) -> TabActions {
     if let Some(err) = &state.error {
         opcuaegui_shared::widgets::toast_card(
             ui,
-            opcuaegui_shared::theme::STATUS_BAD,
+            opcuaegui_shared::theme::STATUS_BAD(),
             err,
         );
     }
 
     ui.separator();
-
-    let plot_points: Vec<[f64; 2]> = state
-        .points
-        .iter()
-        .filter_map(|p| {
-            let ts = parse_to_unix_secs(&p.source_timestamp)?;
-            let v = p.numeric?;
-            Some([ts, v])
-        })
-        .collect();
 
     egui_plot::Plot::new(format!("history_plot_{}", state.node_id))
         .height(220.0)
@@ -114,15 +134,15 @@ pub fn show(ui: &mut egui::Ui, state: &mut HistoryTabState) -> TabActions {
             }
         })
         .show(ui, |plot_ui| {
-            if plot_points.is_empty() {
+            if state.plot_cache.is_empty() {
                 return;
             }
             plot_ui.line(
                 egui_plot::Line::new(
                     state.display_name.clone(),
-                    egui_plot::PlotPoints::from(plot_points),
+                    egui_plot::PlotPoints::from(state.plot_cache.clone()),
                 )
-                .color(opcuaegui_shared::theme::ACCENT),
+                .color(opcuaegui_shared::theme::ACCENT()),
             );
         });
 
@@ -193,12 +213,6 @@ pub fn dispatch_refresh(
         max_values: state.max_values,
         req_id,
     });
-}
-
-fn parse_to_unix_secs(rfc3339: &str) -> Option<f64> {
-    DateTime::parse_from_rfc3339(rfc3339)
-        .ok()
-        .map(|dt| dt.timestamp_millis() as f64 / 1000.0)
 }
 
 fn format_time_axis(unix_secs: f64) -> String {

@@ -13,13 +13,13 @@ pub fn show(ui: &mut egui::Ui, model: &mut AppModel, backend: &BackendHandle) {
         ui.label(
             egui::RichText::new("节点列表")
                 .strong()
-                .color(theme::TEXT_PRIMARY),
+                .color(theme::TEXT_PRIMARY()),
         );
         let count = model.address_space.nodes.len();
         ui.label(
             egui::RichText::new(format!("· {count} 个变量"))
                 .small()
-                .color(theme::TEXT_MUTED),
+                .color(theme::TEXT_MUTED()),
         );
         let multi = model.selected_node_ids.len();
         if multi > 1 {
@@ -27,7 +27,7 @@ pub fn show(ui: &mut egui::Ui, model: &mut AppModel, backend: &BackendHandle) {
             ui.label(
                 egui::RichText::new(format!("已选 {multi}"))
                     .small()
-                    .color(theme::ACCENT),
+                    .color(theme::ACCENT()),
             );
             if ui.button("🗑 移除选中").clicked() {
                 let ids: Vec<String> = model.selected_node_ids.iter().cloned().collect();
@@ -45,8 +45,7 @@ pub fn show(ui: &mut egui::Ui, model: &mut AppModel, backend: &BackendHandle) {
     });
     ui.separator();
 
-    let nodes = model.address_space.nodes.clone();
-    let total = nodes.len();
+    let total = model.address_space.nodes.len();
     if total == 0 {
         empty_state(
             ui,
@@ -59,8 +58,17 @@ pub fn show(ui: &mut egui::Ui, model: &mut AppModel, backend: &BackendHandle) {
 
     let ctx_modifiers = ui.ctx().input(|i| i.modifiers);
     let ctrl = ctx_modifiers.ctrl || ctx_modifiers.command;
+    let shift = ctx_modifiers.shift;
 
-    let mut delete_request: Option<String> = None;
+    enum RowAction {
+        Click {
+            idx: usize,
+            node_id: String,
+        },
+        Delete(String),
+    }
+
+    let mut action: Option<RowAction> = None;
 
     let mut table = TableBuilder::new(ui)
         .striped(true)
@@ -83,7 +91,8 @@ pub fn show(ui: &mut egui::Ui, model: &mut AppModel, backend: &BackendHandle) {
         })
         .body(|body| {
             body.rows(20.0, total, |mut row| {
-                let Some(n) = nodes.get(row.index()) else {
+                let idx = row.index();
+                let Some(n) = model.address_space.nodes.get(idx) else {
                     return;
                 };
                 let multi_selected = model.selected_node_ids.contains(&n.node_id);
@@ -99,7 +108,7 @@ pub fn show(ui: &mut egui::Ui, model: &mut AppModel, backend: &BackendHandle) {
                         egui::RichText::new(&n.node_id)
                             .monospace()
                             .small()
-                            .color(theme::TEXT_MUTED),
+                            .color(theme::TEXT_MUTED()),
                     );
                 });
                 row.col(|ui| {
@@ -112,49 +121,78 @@ pub fn show(ui: &mut egui::Ui, model: &mut AppModel, backend: &BackendHandle) {
                     let v = model
                         .current_values
                         .get(&n.node_id)
-                        .cloned()
-                        .or_else(|| n.current_value.clone())
-                        .unwrap_or_else(|| "—".to_string());
+                        .map(|s| s.as_str())
+                        .or(n.current_value.as_deref())
+                        .unwrap_or("—");
                     ui.monospace(v);
                 });
                 row.col(|ui| {
                     let (lbl, color) = if n.writable {
-                        ("RW", theme::ACCENT)
+                        ("RW", theme::ACCENT())
                     } else {
-                        ("R", theme::TEXT_MUTED)
+                        ("R", theme::TEXT_MUTED())
                     };
                     ui.colored_label(color, lbl);
                 });
 
                 let resp = row.response();
                 if resp.clicked() {
-                    if ctrl {
-                        if multi_selected {
-                            model.selected_node_ids.remove(&n.node_id);
-                        } else {
-                            model.selected_node_ids.insert(n.node_id.clone());
-                        }
-                    } else {
-                        model.selected_node_ids.clear();
-                    }
-                    model.selected_node_id = Some(n.node_id.clone());
+                    action = Some(RowAction::Click {
+                        idx,
+                        node_id: n.node_id.clone(),
+                    });
                 }
-                let nid = n.node_id.clone();
+                let nid_for_menu = n.node_id.clone();
                 resp.context_menu(|ui| {
                     if ui.button("🗑 删除节点").clicked() {
-                        delete_request = Some(nid.clone());
+                        action = Some(RowAction::Delete(nid_for_menu.clone()));
                         ui.close();
                     }
                 });
             });
         });
 
-    if let Some(id) = delete_request {
-        backend.send(UiCommand::RemoveNode(id.clone()));
-        model.selected_node_ids.remove(&id);
-        if model.selected_node_id.as_deref() == Some(&id) {
-            model.selected_node_id = None;
+    match action {
+        Some(RowAction::Click { idx, node_id }) => {
+            if shift {
+                if let Some(anchor) = model.last_clicked_row {
+                    let (lo, hi) = if anchor <= idx {
+                        (anchor, idx)
+                    } else {
+                        (idx, anchor)
+                    };
+                    if !ctrl {
+                        model.selected_node_ids.clear();
+                    }
+                    for i in lo..=hi {
+                        if let Some(row) = model.address_space.nodes.get(i) {
+                            model.selected_node_ids.insert(row.node_id.clone());
+                        }
+                    }
+                } else {
+                    model.selected_node_ids.insert(node_id.clone());
+                }
+            } else if ctrl {
+                if model.selected_node_ids.contains(&node_id) {
+                    model.selected_node_ids.remove(&node_id);
+                } else {
+                    model.selected_node_ids.insert(node_id.clone());
+                }
+                model.last_clicked_row = Some(idx);
+            } else {
+                model.selected_node_ids.clear();
+                model.last_clicked_row = Some(idx);
+            }
+            model.selected_node_id = Some(node_id);
         }
+        Some(RowAction::Delete(id)) => {
+            backend.send(UiCommand::RemoveNode(id.clone()));
+            model.selected_node_ids.remove(&id);
+            if model.selected_node_id.as_deref() == Some(&id) {
+                model.selected_node_id = None;
+            }
+        }
+        None => {}
     }
 }
 

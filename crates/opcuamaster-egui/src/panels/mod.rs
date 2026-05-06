@@ -9,15 +9,15 @@ pub mod value_panel;
 pub fn quality_color(q: &str) -> egui::Color32 {
     use opcuaegui_shared::theme;
     if q.is_empty() {
-        theme::STATUS_IDLE
+        theme::STATUS_IDLE()
     } else if q.starts_with("Good") {
-        theme::STATUS_OK
+        theme::STATUS_OK()
     } else if q.starts_with("Bad") || q.contains("Error") {
-        theme::STATUS_BAD
+        theme::STATUS_BAD()
     } else if q.starts_with("Uncertain") {
-        theme::STATUS_WARN
+        theme::STATUS_WARN()
     } else {
-        theme::TEXT_MUTED
+        theme::TEXT_MUTED()
     }
 }
 
